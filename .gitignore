@@ -1,0 +1,30 @@
+# Dependency environments and generated Python files
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local audio library, databases, models, and generated results
+/data/
+/models/
+/artifacts/
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+
+# Machine-specific configuration and environment variables
+/settings.json
+/settings.tmp
+.env
+.env.*
+!.env.example
+
+# Logs and operating-system files
+*.log
+.DS_Store

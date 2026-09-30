@@ -1,0 +1,15 @@
+# Inference-only environment, isolated from the Web app.
+# PyTorch <2.6 retains compatibility with the upstream checkpoint loader.
+torch==2.5.1
+torchaudio==2.5.1
+numpy==1.26.4
+scipy==1.13.1
+librosa==0.10.2
+huggingface-hub>=0.28.1,<1
+transformers==4.46.3
+munch==4.0.0
+einops==0.8.0
+descript-audio-codec==1.0.0
+soundfile==0.12.1
+pyyaml>=6,<7
+demucs==4.0.1

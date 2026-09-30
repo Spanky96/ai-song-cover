@@ -1,0 +1,11 @@
+{
+  "name": "ai-cover-browser-checks",
+  "private": true,
+  "scripts": {
+    "test:browser": "node scripts/smoke-browser.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.58.2",
+    "prettier": "^3.6.2"
+  }
+}

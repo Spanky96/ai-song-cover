@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f7f8fa" />
+    <title>AI 翻唱工作室</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <link rel="stylesheet" href="/static/style.css" />
+    <script defer src="/static/vendor/lucide.min.js"></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="#studio"
+          ><span class="brand-mark"><i data-lucide="audio-lines"></i></span
+          ><span>AI 翻唱<span class="brand-sub">本地工作室</span></span></a
+        >
+        <nav id="navigation" aria-label="主导航">
+          <a href="#studio" data-page="studio"
+            ><i data-lucide="sliders-horizontal"></i><span>创作工作台</span></a
+          >
+          <span class="nav-caption">我的资产</span>
+          <a href="#voices" data-page="voices"
+            ><i data-lucide="mic"></i><span>我的音色</span
+            ><small id="voice-count">0</small></a
+          >
+          <a href="#songs" data-page="songs"
+            ><i data-lucide="disc-3"></i><span>歌曲与伴奏</span
+            ><small id="song-count">0</small></a
+          >
+          <a href="#lyrics" data-page="lyrics"
+            ><i data-lucide="notebook-pen"></i><span>歌词库</span></a
+          >
+          <span class="nav-caption">创作记录</span>
+          <a href="#outputs" data-page="outputs"
+            ><i data-lucide="headphones"></i><span>我的作品</span
+            ><small id="output-count">0</small></a
+          >
+          <a href="#jobs" data-page="jobs"
+            ><i data-lucide="list-checks"></i><span>生成任务</span></a
+          >
+          <a href="#settings" data-page="settings" class="settings-link"
+            ><i data-lucide="settings-2"></i><span>工作室设置</span></a
+          >
+        </nav>
+        <div class="sidebar-bottom">
+          <span class="local-dot"></span>本机存储<span class="version"
+            >v0.1</span
+          >
+        </div>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="breadcrumb">
+            <span>我的工作室</span><i data-lucide="chevron-right"></i
+            ><strong id="page-label">创作工作台</strong>
+          </div>
+          <button
+            class="environment-chip"
+            id="environment-chip"
+            title="查看运行环境"
+          >
+            <span class="status-dot"></span
+            ><span id="environment-label">连接中</span
+            ><i data-lucide="chevron-right"></i>
+          </button>
+        </header>
+        <main id="main" aria-live="polite">
+          <div class="initial-loading">正在加载工作室...</div>
+        </main>
+        <footer class="workspace-footer">
+          <span>AI 翻唱工作室</span><span id="storage-summary">本地运行</span>
+        </footer>
+      </div>
+    </div>
+    <div id="player" class="player" hidden>
+      <div class="player-art"><i data-lucide="audio-lines"></i></div>
+      <div class="player-name">
+        <strong id="player-title"></strong><small id="player-subtitle"></small>
+      </div>
+      <button
+        id="play-toggle"
+        class="play-button"
+        title="播放 / 暂停"
+        aria-label="播放 / 暂停"
+      >
+        <i data-lucide="play"></i>
+      </button>
+      <span class="player-time" id="current-time">0:00</span
+      ><input
+        id="seek"
+        type="range"
+        min="0"
+        max="100"
+        step="0.1"
+        value="0"
+        aria-label="播放进度"
+      /><span class="player-time" id="duration-time">0:00</span>
+      <i class="volume-icon" data-lucide="volume-2"></i
+      ><input
+        id="volume"
+        class="volume"
+        type="range"
+        min="0"
+        max="1"
+        step="0.05"
+        value="0.8"
+        aria-label="音量"
+      />
+      <button
+        id="close-player"
+        class="icon-button"
+        title="关闭播放器"
+        aria-label="关闭播放器"
+      >
+        <i data-lucide="x"></i></button
+      ><audio id="audio" preload="metadata"></audio>
+    </div>
+    <dialog id="dialog"><div id="dialog-content"></div></dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <input
+      type="file"
+      id="file-input"
+      accept="audio/*,.flac,.aiff,.opus"
+      multiple
+      hidden
+    />
+  </body>
+</html>
