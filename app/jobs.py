@@ -151,7 +151,9 @@ class JobManager:
             raise ValueError("任务引用的音频资产已不存在。")
         return self.settings.data_dir / asset["path"]
 
-    def _publish(self, path: Path, kind: str, name: str, job_id: str) -> str:
+    def _publish(
+        self, path: Path, kind: str, name: str, job_id: str, role: str | None = None
+    ) -> str:
         folder = {"output": "outputs", "vocal": "vocals", "instrumental": "instrumentals"}[kind]
         asset_id = new_id()
         destination = self.settings.data_dir / "assets" / folder / f"{asset_id}{path.suffix}"
@@ -166,7 +168,7 @@ class JobManager:
                     "path": str(destination.relative_to(self.settings.data_dir)),
                     **audio.probe(destination),
                     "waveform": audio.waveform(destination),
-                    "metadata": {"job_id": job_id},
+                    "metadata": {"job_id": job_id, **({"role": role} if role else {})},
                     "created_at": now(),
                 },
             )
@@ -196,6 +198,36 @@ class JobManager:
         instrumental = (
             self._asset_path(params["instrumental_id"]) if params.get("instrumental_id") else None
         )
+        # Previews trim before separation/conversion so a segment costs seconds, not minutes.
+        # The file stem stays "source" so the Demucs output path below is unchanged; an
+        # externally selected instrumental is windowed to match, while a separated one
+        # already shares the trimmed timeline.
+        preview_seconds = float(params.get("preview_seconds") or 0)
+        if preview_seconds:
+            folder = work / "preview"
+            folder.mkdir(exist_ok=True)
+            trimmed = folder / "source.wav"
+            self._run(
+                job_id,
+                audio.trim_command(
+                    source, trimmed, float(params.get("start_seconds") or 0), preview_seconds
+                ),
+                event,
+            )
+            source = trimmed
+            if instrumental:
+                windowed = folder / "instrumental.wav"
+                self._run(
+                    job_id,
+                    audio.trim_command(
+                        instrumental,
+                        windowed,
+                        float(params.get("start_seconds") or 0),
+                        preview_seconds,
+                    ),
+                    event,
+                )
+                instrumental = windowed
         vocal = source
         if source_asset["kind"] == "song":
             self.db.update_job(job_id, stage="分离人声与伴奏", progress=15)
@@ -234,7 +266,9 @@ class JobManager:
                     raise RuntimeError("Seed-VC 未产生唯一的转换结果。")
                 vocal = candidates[0]
             self.db.update_job(job_id, stage="混音与同步", progress=80)
-            duration = source_asset["duration"]
+            duration = (
+                audio.probe(vocal)["duration"] if preview_seconds else source_asset["duration"]
+            )
             if instrumental:
                 duration = max(duration, audio.probe(instrumental)["duration"])
             mixed = work / "mix.wav"
@@ -258,15 +292,35 @@ class JobManager:
                 self._run(job_id, audio.mp3_command(mixed, mp3), event)
                 files.append(mp3)
             output_ids = []
+            published_ids = []
             try:
                 for file in files:
                     if event.is_set():
                         raise Cancelled()
-                    output_ids.append(self._publish(file, "output", job["name"], job_id))
+                    output_ids.append(
+                        self._publish(
+                            file,
+                            "output",
+                            job["name"],
+                            job_id,
+                            role="preview" if preview_seconds else None,
+                        )
+                    )
+                    published_ids.append(output_ids[-1])
+                if job_type == "cover":
+                    published_ids.append(
+                        self._publish(
+                            vocal,
+                            "vocal",
+                            f"{job['name']} · 转换人声",
+                            job_id,
+                            role="converted_vocal",
+                        )
+                    )
                 if event.is_set():
                     raise Cancelled()
             except BaseException:
-                for asset_id in output_ids:
+                for asset_id in published_ids:
                     self._remove_asset(asset_id)
                 raise
         self.db.update_job(

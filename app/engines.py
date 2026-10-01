@@ -31,15 +31,19 @@ class Engines:
             seed_runtime = runtimes[str(settings.seed_python)]
             demucs_runtime = runtimes[str(settings.demucs_python)]
             script_ok = (settings.seed_repo / "inference.py").is_file()
+            weights_ready = settings.model_weights_ready
             self._cache = {
                 "platform": platform.system(),
                 "architecture": platform.machine(),
                 "ffmpeg": bool(shutil.which("ffmpeg") and shutil.which("ffprobe")),
+                "model_weights_ready": weights_ready,
                 "seed": {
                     "ready": script_ok and seed_runtime.get("seed", False),
                     "repository_found": script_ok,
                     "runtime": seed_runtime,
-                    "model_weights": "首次推理按需加载",
+                    "model_weights": "已下载校验，可离线推理"
+                    if weights_ready
+                    else "首次推理按需加载",
                 },
                 "demucs": {
                     "ready": demucs_runtime.get("demucs", False),
@@ -86,8 +90,12 @@ print(json.dumps(result))
         if not status["ffmpeg"]:
             errors.append("未安装 FFmpeg。")
         if job_type in ("cover", "separate"):
-            if free_bytes(self.settings.models_dir) < 10 * GIB:
-                errors.append("模型目录可用空间不足 10 GB，请先配置容量充足的存储目录。")
+            required = self.settings.model_free_requirement
+            if free_bytes(self.settings.models_dir) < required:
+                errors.append(
+                    f"模型目录需保留 {required / GIB:.2f} GiB 可用空间"
+                    "（包含未下载权重及系统余量）。"
+                )
             if source_kind == "song" and not status["demucs"]["ready"]:
                 errors.append("Demucs 推理环境未安装。")
         if job_type == "cover" and not status["seed"]["ready"]:
@@ -117,7 +125,8 @@ print(json.dumps(result))
     def seed_command(self, source: Path, reference: Path, output: Path, params: dict) -> list[str]:
         return [
             str(self.settings.seed_python),
-            str(self.settings.seed_repo / "inference.py"),
+            str(self.settings.project_root / "scripts/seed_inference.py"),
+            str(self.settings.seed_repo),
             "--source",
             str(source),
             "--target",

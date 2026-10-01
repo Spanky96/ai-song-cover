@@ -55,6 +55,7 @@ let originalAssets = new Set();
 let originalLyrics = new Set();
 let originalJobs = new Set();
 let baselineLoaded = false;
+let submittedMixId = null;
 
 async function noHorizontalOverflow(page, label) {
   const dimensions = await page.evaluate(() => ({
@@ -199,6 +200,14 @@ async function noHorizontalOverflow(page, label) {
 
   await page.goto(`${url}/#studio`);
   await page.waitForSelector("#job-form");
+  assert(
+    await page.locator('#job-form button[data-preview="1"]').count(),
+    "Preview submit button missing",
+  );
+  assert(
+    await page.locator('#job-form input[name="start_seconds"]').count(),
+    "Preview start field missing",
+  );
   assert.equal(
     await page
       .locator('select[name="instrumental_id"] option')
@@ -221,24 +230,40 @@ async function noHorizontalOverflow(page, label) {
   await page
     .locator('#job-form input[name="name"]')
     .fill("浏览器验收混音（测试音频）");
-  await page.getByRole("button", { name: "开始混音", exact: true }).click();
-  await page.waitForFunction(
-    async () => {
-      const jobs = await (await fetch("/api/jobs")).json();
-      return jobs.some(
-        (j) =>
-          j.name === "浏览器验收混音（测试音频）" && j.state === "completed",
-      );
-    },
-    null,
-    { timeout: 30000 },
+  const submission = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url() === `${url}/api/jobs`,
   );
+  await page.getByRole("button", { name: "开始混音", exact: true }).click();
+  const submitted = await submission;
+  assert(submitted.ok(), "Mix job submission failed");
+  submittedMixId = (await submitted.json()).id;
+  // Poll in Node: waitForFunction treats an async predicate's Promise as truthy.
+  const deadline = Date.now() + 30000;
+  let completedMix = null;
+  while (Date.now() < deadline) {
+    const jobs = await (await request.get(`${url}/api/jobs`)).json();
+    const job = jobs.find((entry) => entry.id === submittedMixId);
+    if (job?.state === "completed") {
+      completedMix = job;
+      break;
+    }
+    assert(
+      !["failed", "cancelled", "interrupted"].includes(job?.state),
+      job?.error,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  assert(completedMix, "Mix job did not finish");
   await page.goto(`${url}/#outputs`);
   await page.waitForSelector(".asset-table tbody tr");
   await page.evaluate(() => (document.querySelector("#toast").hidden = true));
-  const outputs = (
-    await (await request.get(`${url}/api/assets`)).json()
-  ).filter((a) => a.kind === "output" && !originalAssets.has(a.id));
+  const outputResponse = await request.get(`${url}/api/assets`);
+  const outputAssets = await outputResponse.json();
+  const outputs = outputAssets.filter(
+    (a) => a.kind === "output" && a.metadata.job_id === submittedMixId,
+  );
   assert.equal(outputs.length, 2);
   for (const output of outputs) {
     const response = await request.get(
@@ -306,8 +331,25 @@ async function noHorizontalOverflow(page, label) {
           if (
             !originalJobs.has(job.id) &&
             job.name === "浏览器验收混音（测试音频）"
-          )
-            await request.delete(`${url}/api/jobs/${job.id}`);
+          ) {
+            if (["queued", "running", "cancelling"].includes(job.state)) {
+              await request.post(`${url}/api/jobs/${job.id}/cancel`);
+              for (let attempt = 0; attempt < 50; attempt++) {
+                const jobs = await (
+                  await request.get(`${url}/api/jobs`)
+                ).json();
+                const current = jobs.find((entry) => entry.id === job.id);
+                if (
+                  !current ||
+                  !["queued", "running", "cancelling"].includes(current.state)
+                )
+                  break;
+                await new Promise((resolve) => setTimeout(resolve, 200));
+              }
+            }
+            const response = await request.delete(`${url}/api/jobs/${job.id}`);
+            assert(response.ok(), "Test job cleanup failed");
+          }
         }
         for (const asset of await (
           await request.get(`${url}/api/assets`)

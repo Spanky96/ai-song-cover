@@ -24,6 +24,8 @@ const state = {
     vocal_gain_db: 0,
     instrumental_gain_db: -3,
     offset_ms: 0,
+    start_seconds: 35,
+    preview_length: 18,
     formats: ["wav", "mp3"],
   },
   uploading: false,
@@ -279,7 +281,7 @@ function renderStudio() {
       )
       .join(
         "",
-      )}</div><form id="job-form">${sourceMarkup}${voiceField}${accompaniment}${draft.job_type !== "separate" ? renderMixFields() : ""}<label class="field"><span>作品名称</span><input type="text" name="name" maxlength="120" value="${esc(draft.name)}" placeholder="${esc(byId(draft.source_id)?.name || "未命名作品")}"></label><div class="submit-row"><button class="button primary" id="generate-button" type="submit">${icon(draft.job_type === "cover" ? "sparkles" : "play")}${draft.job_type === "cover" ? "生成翻唱" : draft.job_type === "mix" ? "开始混音" : "分离音频"}</button><small>${draft.job_type === "cover" ? "原曲旋律与歌词" : draft.job_type === "mix" ? "WAV / MP3" : "人声 / 伴奏"}</small></div><div class="form-error" id="job-error" role="alert"></div></form></section><aside class="activity"><section><div class="section-heading"><h2>最近任务</h2><a href="#jobs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-jobs">${renderRecentJobs()}</div></section><section class="recent-section"><div class="section-heading"><h2>最近作品</h2><a href="#outputs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-outputs">${renderRecentOutputs()}</div></section></aside></div>`
+      )}</div><form id="job-form">${sourceMarkup}${voiceField}${accompaniment}${draft.job_type !== "separate" ? renderMixFields() : ""}${draft.job_type !== "separate" ? renderPreviewFields() : ""}<label class="field"><span>作品名称</span><input type="text" name="name" maxlength="120" value="${esc(draft.name)}" placeholder="${esc(byId(draft.source_id)?.name || "未命名作品")}"></label><div class="submit-row">${draft.job_type !== "separate" ? `<button class="button secondary" type="submit" data-preview="1">${icon("headphones")}试听片段</button>` : ""}<button class="button primary" id="generate-button" type="submit">${icon(draft.job_type === "cover" ? "sparkles" : "play")}${draft.job_type === "cover" ? "生成翻唱" : draft.job_type === "mix" ? "开始混音" : "分离音频"}</button><small>${draft.job_type === "cover" ? "原曲旋律与歌词" : draft.job_type === "mix" ? "WAV / MP3" : "人声 / 伴奏"}</small></div><div class="form-error" id="job-error" role="alert"></div></form></section><aside class="activity"><section><div class="section-heading"><h2>最近任务</h2><a href="#jobs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-jobs">${renderRecentJobs()}</div></section><section class="recent-section"><div class="section-heading"><h2>最近作品</h2><a href="#outputs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-outputs">${renderRecentOutputs()}</div></section></aside></div>`
   );
 }
 
@@ -290,9 +292,16 @@ function renderMixFields() {
   return `<section class="form-section"><div class="form-grid">${range("vocal_gain_db", "人声音量", -24, 12, "dB")}${range("instrumental_gain_db", "伴奏音量", -24, 12, "dB")}</div></section><details class="advanced"><summary>高级参数 ${icon("chevron-down")}</summary><div class="form-grid">${d.job_type === "cover" ? `<label class="field"><span>推理步数</span><select name="diffusion_steps" aria-label="推理步数">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option ${d.diffusion_steps === n ? "selected" : ""} value="${n}">${n}</option>`).join("")}</select></label><label class="field"><span>人声移调 / 半音</span><input name="pitch_shift" type="number" min="-12" max="12" step="1" value="${d.pitch_shift}"></label><label class="field"><span>音色引导强度</span><input name="cfg_rate" type="number" min="0" max="1" step="0.05" value="${d.cfg_rate}"></label>` : ""}<label class="field"><span>人声时间偏移 / ms</span><input name="offset_ms" type="number" min="-10000" max="10000" step="10" value="${d.offset_ms}" title="正值延后人声，负值提前人声"></label></div></details><div class="form-grid" style="margin-bottom:20px"><label class="field"><span>导出格式</span><div class="export-options"><label><input type="checkbox" name="formats" value="wav" ${d.formats.includes("wav") ? "checked" : ""}> WAV</label><label><input type="checkbox" name="formats" value="mp3" ${d.formats.includes("mp3") ? "checked" : ""}> MP3</label></div></label></div>`;
 }
 
+function renderPreviewFields() {
+  const d = state.draft;
+  const source = byId(d.source_id);
+  return `<section class="form-section"><div class="field-heading"><span class="field-title">${icon("headphones")}试听片段</span><span class="optional">快速调参</span></div><div class="form-grid"><label class="field"><span>起点 / 秒${source ? `（全长 ${time(source.duration)}）` : ""}</span><input name="start_seconds" type="number" min="0" step="1" value="${d.start_seconds}" aria-label="片段起点秒数"></label><label class="field"><span>片段时长</span><select name="preview_length" aria-label="片段时长">${[10, 18, 30].map((n) => `<option ${Number(d.preview_length) === n ? "selected" : ""} value="${n}">${n} 秒</option>`).join("")}</select></label></div><small class="subtle-label">只转换选中片段，快速比较参数；满意后再生成整曲。</small></section>`;
+}
+
 function taskItem(job, full = false) {
   const running = activeStates.includes(job.state);
-  return `<div class="task-item"><div class="task-top"><div><div class="task-title">${esc(job.name)}</div><div class="task-meta">${esc(job.params.voice_name || (job.params.job_type === "mix" ? "直接混音" : "人声分离"))} · ${date(job.created_at)}</div></div>${badge(job)}</div>${running ? `<div class="progress-track"><span style="width:${job.progress}%"></span></div>` : ""}${full && job.error ? `<div class="job-error">${esc(job.error)}</div>` : ""}<div class="task-bottom"><span>${esc(job.stage)}${running ? ` · ${job.progress}%` : ""}</span><div class="task-actions">${iconButton("file-text", "查看日志", `data-log="${job.id}"`)}${running ? iconButton("square", "取消任务", `data-cancel="${job.id}"`) : iconButton("rotate-ccw", "重新执行", `data-retry="${job.id}"`)}${full && !running ? iconButton("trash-2", "删除任务记录与临时文件", `data-delete-job="${job.id}"`, true) : ""}</div></div>${
+  const preview = (job.params.preview_seconds || 0) > 0;
+  return `<div class="task-item"><div class="task-top"><div><div class="task-title">${esc(job.name)}${preview ? ` <span class="mini-tag">试听 ${job.params.start_seconds || 0}秒起</span>` : ""}</div><div class="task-meta">${esc(job.params.voice_name || (job.params.job_type === "mix" ? "直接混音" : "人声分离"))} · ${date(job.created_at)}</div></div>${badge(job)}</div>${running ? `<div class="progress-track"><span style="width:${job.progress}%"></span></div>` : ""}${full && job.error ? `<div class="job-error">${esc(job.error)}</div>` : ""}<div class="task-bottom"><span>${esc(job.stage)}${running ? ` · ${job.progress}%` : ""}</span><div class="task-actions">${iconButton("file-text", "查看日志", `data-log="${job.id}"`)}${running ? iconButton("square", "取消任务", `data-cancel="${job.id}"`) : iconButton("rotate-ccw", "重新执行", `data-retry="${job.id}"`)}${full && job.state === "completed" && job.params.job_type === "cover" ? iconButton("sliders-horizontal", "调整混音（复用转换干声，无需重新转换）", `data-remix-job="${job.id}"`) : ""}${full && !running ? iconButton("trash-2", "删除任务记录与临时文件", `data-delete-job="${job.id}"`, true) : ""}</div></div>${
     full && job.outputs.length
       ? `<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px">${job.outputs
           .map((id) => byId(id))
@@ -357,7 +366,7 @@ function renderSearch() {
 function renderAssetTable(assets, emptyText = "暂无音频资产") {
   if (!assets.length)
     return `<div class="table-empty">${empty("music-2", state.search ? "没有匹配的音频" : emptyText)}</div>`;
-  return `<table class="asset-table"><thead><tr><th>音频名称</th><th>波形</th><th>时长</th><th>文件大小</th><th style="text-align:right">操作</th></tr></thead><tbody>${assets.map((a) => `<tr><td><div class="asset-cell"><button class="play-mini" data-play="${a.id}" title="试听" aria-label="试听">${icon("play")}</button><div class="asset-meta"><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${kindNames[a.kind]} · ${ext(a)} · ${(a.sample_rate / 1000).toFixed(1)} kHz</small></div></div></td><td><canvas class="asset-wave" data-asset="${a.id}" aria-label="音频波形"></canvas></td><td>${time(a.duration)}</td><td>${size(a.size)}</td><td>${rowActions(a)}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="asset-table"><thead><tr><th>音频名称</th><th>波形</th><th>时长</th><th>文件大小</th><th style="text-align:right">操作</th></tr></thead><tbody>${assets.map((a) => `<tr><td><div class="asset-cell"><button class="play-mini" data-play="${a.id}" title="试听" aria-label="试听">${icon("play")}</button><div class="asset-meta"><strong title="${esc(a.name)}">${esc(a.name)}</strong><small>${kindNames[a.kind]}${a.metadata?.role === "preview" ? " · 试听片段" : ""} · ${ext(a)} · ${(a.sample_rate / 1000).toFixed(1)} kHz</small></div></div></td><td><canvas class="asset-wave" data-asset="${a.id}" aria-label="音频波形"></canvas></td><td>${time(a.duration)}</td><td>${size(a.size)}</td><td>${rowActions(a)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 function renderSongs() {
@@ -439,7 +448,7 @@ function renderSettings() {
       "存储与推理环境",
       `<button class="button secondary" data-refresh>${icon("refresh-cw")}重新检测</button>`,
     ) +
-    `<section class="settings-section"><h2>本机环境</h2><div class="engine-grid">${engine("FFmpeg", status.ffmpeg, "音频处理与 WAV / MP3 导出")}${engine("Demucs", status.demucs.ready, `人声分离 · ${s.demucs_device.toUpperCase()}`)}${engine("Seed-VC", status.seed.ready, `歌声转换 · ${status.seed.runtime.mps ? "Apple Metal" : "运行环境待检测"}`)}${engine("模型权重", null, "首次 AI 推理按需加载")}</div></section><section class="settings-section"><h2>资产存储</h2><div class="storage-band"><strong>${size(status.storage.data_free_bytes)}</strong><span>剩余可用空间</span></div><div class="setting-path">${esc(s.data_dir)}</div></section><form id="settings-form"><section class="settings-section"><h2>模型与运行环境</h2><div class="storage-band"><strong>${size(status.storage.models_free_bytes)}</strong><span>模型目录可用空间</span></div>${field("models_dir", "模型存储目录", s.models_dir)}${field("seed_repo", "Seed-VC 项目目录", s.seed_repo)}${field("seed_python", "Seed-VC Python 环境", s.seed_python)}${field("demucs_python", "Demucs Python 环境", s.demucs_python)}<label class="field"><span>人声分离设备</span><select name="demucs_device">${["cpu", "mps", "cuda"].map((d) => `<option ${s.demucs_device === d ? "selected" : ""} value="${d}">${{ cpu: "CPU", mps: "Apple Metal (MPS)", cuda: "NVIDIA CUDA" }[d]}</option>`).join("")}</select></label><div class="submit-row"><button type="submit" class="button primary">${icon("save")}保存配置</button></div></section></form>`
+    `<section class="settings-section"><h2>本机环境</h2><div class="engine-grid">${engine("FFmpeg", status.ffmpeg, "音频处理与 WAV / MP3 导出")}${engine("Demucs", status.demucs.ready, `人声分离 · ${s.demucs_device.toUpperCase()}`)}${engine("Seed-VC", status.seed.ready, `歌声转换 · ${status.seed.runtime.mps ? "Apple Metal" : "运行环境待检测"}`)}${engine("模型权重", status.model_weights_ready, status.seed.model_weights)}</div></section><section class="settings-section"><h2>资产存储</h2><div class="storage-band"><strong>${size(status.storage.data_free_bytes)}</strong><span>剩余可用空间</span></div><div class="setting-path">${esc(s.data_dir)}</div></section><form id="settings-form"><section class="settings-section"><h2>模型与运行环境</h2><div class="storage-band"><strong>${size(status.storage.models_free_bytes)}</strong><span>模型目录可用空间</span></div>${field("models_dir", "模型存储目录", s.models_dir)}${field("seed_repo", "Seed-VC 项目目录", s.seed_repo)}${field("seed_python", "Seed-VC Python 环境", s.seed_python)}${field("demucs_python", "Demucs Python 环境", s.demucs_python)}<label class="field"><span>人声分离设备</span><select name="demucs_device">${["cpu", "mps", "cuda"].map((d) => `<option ${s.demucs_device === d ? "selected" : ""} value="${d}">${{ cpu: "CPU", mps: "Apple Metal (MPS)", cuda: "NVIDIA CUDA" }[d]}</option>`).join("")}</select></label><div class="submit-row"><button type="submit" class="button primary">${icon("save")}保存配置</button></div></section></form>`
   );
 }
 
@@ -589,6 +598,30 @@ document.addEventListener("click", async (event) => {
       await refreshData();
       return toast("已创建新任务");
     }
+    if (button.dataset.remixJob) {
+      const job = state.jobs.find((j) => j.id === button.dataset.remixJob);
+      const vocal =
+        job &&
+        state.assets.find(
+          (a) =>
+            a.metadata?.job_id === job.id && a.metadata?.role === "converted_vocal",
+        );
+      if (!vocal) return toast("未找到该任务的转换干声。");
+      Object.assign(state.draft, {
+        job_type: "mix",
+        source_kind: "vocal",
+        source_id: vocal.id,
+        instrumental_id: job.params.instrumental_id || "",
+        lyric_id: "",
+        vocal_gain_db: job.params.vocal_gain_db ?? 0,
+        instrumental_gain_db: job.params.instrumental_gain_db ?? -3,
+        offset_ms: job.params.offset_ms ?? 0,
+        name: `${job.name} · 混音调整`,
+      });
+      if (location.hash !== "#studio") location.hash = "studio";
+      else render();
+      return;
+    }
     if (button.dataset.log) {
       const result = await api(`/jobs/${button.dataset.log}/log`);
       showDialog(
@@ -707,12 +740,23 @@ document.addEventListener("submit", async (event) => {
       $("#job-error").textContent = "";
       const params = { ...state.draft };
       delete params.source_kind;
+      delete params.preview_length;
       for (const key of ["voice_id", "instrumental_id", "lyric_id"])
         params[key] ||= null;
       if (!params.source_id) throw new Error("请先导入并选择演唱来源。");
       if (params.job_type === "cover" && !params.voice_id)
         throw new Error("请先导入并选择目标音色。");
       if (!params.formats.length) throw new Error("请选择至少一种导出格式。");
+      const previewMode = event.submitter?.dataset.preview === "1";
+      if (previewMode) {
+        params.preview_seconds = Number(state.draft.preview_length) || 18;
+        params.start_seconds = Math.max(0, Number(state.draft.start_seconds) || 0);
+        if (!params.name)
+          params.name = `试听 · ${byId(params.source_id)?.name || "未命名"} · ${params.start_seconds}秒起`;
+      } else {
+        params.start_seconds = 0;
+        params.preview_seconds = 0;
+      }
       await api("/jobs", { method: "POST", body: JSON.stringify(params) });
       await refreshData();
       toast("任务已加入队列");

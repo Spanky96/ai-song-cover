@@ -94,6 +94,31 @@ def normalize_command(source: Path, target: Path) -> list[str]:
     ]
 
 
+def trim_command(source: Path, target: Path, start: float, seconds: float) -> list[str]:
+    # Same output spec as normalize_command so previews feed the pipeline unchanged.
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-ss",
+        f"{max(0, start):.3f}",
+        "-i",
+        str(source),
+        "-t",
+        f"{max(0.1, seconds):.3f}",
+        "-vn",
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_s16le",
+        str(target),
+    ]
+
+
 def mix_command(
     vocal: Path,
     instrumental: Path | None,

@@ -246,6 +246,8 @@ def test_seed_singing_command_retains_pitch_and_duration(application):
         Path("result"),
         {"diffusion_steps": 30, "cfg_rate": 0.7, "pitch_shift": 2},
     )
+    assert command[1].endswith("scripts/seed_inference.py")
+    assert command[2] == str(application.state.settings.seed_repo)
     for key, expected in [
         ("--f0-condition", "True"),
         ("--length-adjust", "1.0"),
@@ -320,4 +322,128 @@ def test_cover_orchestration_with_explicit_stub_engines(client, application, wav
     generated = [
         a for a in client.get("/api/assets").json() if a["metadata"].get("job_id") == finished["id"]
     ]
-    assert sorted(a["kind"] for a in generated) == ["instrumental", "output", "output", "vocal"]
+    assert sorted(a["kind"] for a in generated) == [
+        "instrumental",
+        "output",
+        "output",
+        "vocal",
+        "vocal",
+    ]
+    converted = next(a for a in generated if a["metadata"].get("role") == "converted_vocal")
+    assert converted["id"] not in finished["outputs"]
+    assert client.get(f"/api/assets/{converted['id']}/audio").status_code == 200
+    work = application.state.settings.data_dir / "jobs" / finished["id"]
+    assert not (work / "converted").exists()
+    remixed = client.post("/api/jobs", json={"job_type": "mix", "source_id": converted["id"]})
+    assert remixed.status_code == 201
+    assert wait_job(client, remixed.json()["id"])["state"] == "completed"
+    assert calls == ["demucs", "seed"]
+
+def test_preview_window_trims_cover_to_segment(client, application, monkeypatch):
+    source = upload(client, make_wav(seconds=10), "vocal")
+    voice = upload(client, make_wav(seconds=2), "voice")
+    engines = application.state.engines
+    monkeypatch.setattr(engines, "validate", lambda *_: [])
+    trimmed_sources = []
+
+    def fake_seed(source, reference, output, params):
+        trimmed_sources.append(source)
+        return [
+            sys.executable,
+            "-c",
+            "import sys, shutil; from pathlib import Path; "
+            "shutil.copyfile(sys.argv[1], Path(sys.argv[2])/'vc_stub.wav')",
+            str(source),
+            str(output),
+        ]
+
+    monkeypatch.setattr(engines, "seed_command", fake_seed)
+    application.state.settings.seed_repo.mkdir(parents=True)
+    created = client.post(
+        "/api/jobs",
+        json={
+            "source_id": source["id"],
+            "voice_id": voice["id"],
+            "start_seconds": 2,
+            "preview_seconds": 4,
+        },
+    )
+    assert created.status_code == 201
+    finished = wait_job(client, created.json()["id"])
+    assert finished["state"] == "completed", finished["error"]
+    assert len(trimmed_sources) == 1
+    # The pipeline must convert the trimmed segment, not the full source; the
+    # working file itself is cleaned up after the job finishes.
+    assert trimmed_sources[0].parent.name == "preview"
+    generated = [
+        a for a in client.get("/api/assets").json() if a["metadata"].get("job_id") == finished["id"]
+    ]
+    outputs = [a for a in generated if a["kind"] == "output"]
+    assert outputs
+    assert all(a["metadata"].get("role") == "preview" for a in outputs)
+    assert all(a["duration"] == pytest.approx(4, abs=0.5) for a in outputs)
+    converted = next(a for a in generated if a["metadata"].get("role") == "converted_vocal")
+    assert converted["duration"] == pytest.approx(4, abs=0.5)
+
+
+def test_separate_rejects_preview_window(client, wav):
+    song = upload(client, wav, "song")
+    response = client.post(
+        "/api/jobs",
+        json={"job_type": "separate", "source_id": song["id"], "preview_seconds": 18},
+    )
+    assert response.status_code == 422
+
+def test_preview_window_trims_song_before_separation(client, application, monkeypatch):
+    song = upload(client, make_wav(seconds=10), "song")
+    voice = upload(client, make_wav(seconds=2), "voice")
+    engines = application.state.engines
+    monkeypatch.setattr(engines, "validate", lambda *_: [])
+    demucs_sources = []
+
+    def fake_demucs(source, output):
+        demucs_sources.append(source)
+        return [
+            sys.executable,
+            "-c",
+            "import sys, shutil; from pathlib import Path; "
+            "d=Path(sys.argv[2])/'htdemucs/source'; d.mkdir(parents=True); "
+            "shutil.copyfile(sys.argv[1], d/'vocals.wav'); "
+            "shutil.copyfile(sys.argv[1], d/'no_vocals.wav')",
+            str(source),
+            str(output),
+        ]
+
+    def fake_seed(source, reference, output, params):
+        return [
+            sys.executable,
+            "-c",
+            "import sys, shutil; from pathlib import Path; "
+            "shutil.copyfile(sys.argv[1], Path(sys.argv[2])/'vc_stub.wav')",
+            str(source),
+            str(output),
+        ]
+
+    monkeypatch.setattr(engines, "demucs_command", fake_demucs)
+    monkeypatch.setattr(engines, "seed_command", fake_seed)
+    application.state.settings.seed_repo.mkdir(parents=True)
+    created = client.post(
+        "/api/jobs",
+        json={
+            "source_id": song["id"],
+            "voice_id": voice["id"],
+            "start_seconds": 2,
+            "preview_seconds": 4,
+        },
+    )
+    assert created.status_code == 201
+    finished = wait_job(client, created.json()["id"])
+    assert finished["state"] == "completed", finished["error"]
+    # Separation itself ran on the trimmed segment.
+    assert demucs_sources[0].parent.name == "preview"
+    generated = [
+        a for a in client.get("/api/assets").json() if a["metadata"].get("job_id") == finished["id"]
+    ]
+    outputs = [a for a in generated if a["kind"] == "output"]
+    assert all(a["duration"] == pytest.approx(4, abs=0.5) for a in outputs)
+    assert all(a["metadata"].get("role") == "preview" for a in outputs)

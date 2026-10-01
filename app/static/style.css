@@ -724,6 +724,18 @@ textarea {
   width: 5px;
   height: 5px;
 }
+.mini-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--teal) 10%, transparent);
+  color: var(--teal);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
 .progress-track {
   height: 3px;
   background: #e7e9ee;
@@ -1597,6 +1609,8 @@ dialog::backdrop {
   }
   .asset-cell strong {
     font-size: 11px;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
   .asset-cell small {
     font-size: 9px;

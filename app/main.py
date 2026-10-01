@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
 from . import audio
-from .config import GIB, PROJECT_ROOT, Settings, free_bytes
+from .config import PROJECT_ROOT, Settings, free_bytes
 from .database import Database, new_id, now
 from .engines import Engines
 from .jobs import ACTIVE_STATES, JobManager
@@ -49,6 +49,8 @@ class JobRequest(BaseModel):
     vocal_gain_db: float = Field(default=0, ge=-24, le=12)
     instrumental_gain_db: float = Field(default=-3, ge=-24, le=12)
     offset_ms: int = Field(default=0, ge=-10000, le=10000)
+    start_seconds: float = Field(default=0, ge=0, le=1800)
+    preview_seconds: float = Field(default=0, ge=0, le=1800)
     formats: list[Literal["wav", "mp3"]] = Field(default=["wav", "mp3"], min_length=1)
 
 
@@ -111,7 +113,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "models_dir": str(settings.models_dir),
                 "data_free_bytes": free_bytes(settings.data_dir),
                 "models_free_bytes": free_bytes(settings.models_dir),
-                "model_space_ok": free_bytes(settings.models_dir) >= 10 * GIB,
+                "model_space_ok": free_bytes(settings.models_dir)
+                >= settings.model_free_requirement,
             },
         }
 
@@ -265,6 +268,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if request.job_type == "cover":
             if not request.voice_id or get_asset(request.voice_id)["kind"] != "voice":
                 raise HTTPException(422, "请选择参考音色。")
+        if request.job_type == "separate" and (request.start_seconds or request.preview_seconds):
+            raise HTTPException(422, "人声分离不支持试听片段参数。")
         if request.instrumental_id and get_asset(request.instrumental_id)["kind"] != "instrumental":
             raise HTTPException(422, "请选择伴奏资产。")
         errors = engines.validate(request.job_type, source["kind"])

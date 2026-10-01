@@ -97,15 +97,41 @@ class Settings:
             "demucs_device": self.demucs_device,
         }
 
+    @property
+    def model_weights_ready(self) -> bool:
+        manifest = self.models_dir / "install-manifest.json"
+        try:
+            files = json.loads(manifest.read_text())["files"]
+            if len(files) != 10:
+                return False
+            for file in files:
+                path = (self.models_dir / file["path"]).resolve()
+                if not path.is_relative_to(self.models_dir) or path.stat().st_size != file["bytes"]:
+                    return False
+            return True
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+
+    @property
+    def model_free_requirement(self) -> int:
+        return 5 * GIB + (0 if self.model_weights_ready else 2_570_455_151)
+
     def model_environment(self) -> dict:
-        return {
+        environment = {
             **os.environ,
             "HF_HOME": str(self.models_dir / "huggingface"),
             "HF_HUB_CACHE": str(self.models_dir / "huggingface/hub"),
             "TORCH_HOME": str(self.models_dir / "torch"),
             "PYTORCH_ENABLE_MPS_FALLBACK": "1",
             "PYTHONUNBUFFERED": "1",
+            "HF_ENDPOINT": os.environ.get(
+                "HF_ENDPOINT", self.values.get("hf_endpoint", "https://huggingface.co")
+            ),
+            "HF_HUB_DISABLE_XET": "1",
         }
+        if self.model_weights_ready:
+            environment.update(HF_HUB_OFFLINE="1", TRANSFORMERS_OFFLINE="1")
+        return environment
 
 
 def free_bytes(path: Path) -> int:

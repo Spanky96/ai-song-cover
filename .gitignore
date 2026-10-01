@@ -6,6 +6,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+cclogs/
 
 # Local audio library, databases, models, and generated results
 /data/

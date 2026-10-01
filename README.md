@@ -10,6 +10,7 @@
 - 创作：原唱分离后转换音色，或上传自己重新录唱的干声进行转换；可指定单独伴奏。
 - 独立的人声分离、直接混音模式。
 - 调整人声/伴奏增益、移调、时间偏移、推理步数和音色引导强度。
+- 试听片段：只转换选中片段快速比较参数，满意后再生成整曲；已完成翻唱可复用转换干声一键重混增益，无需重新推理。
 - 单任务串行队列、阶段进度、执行日志、取消、重试、重启中断检测。
 - 44.1 kHz / 24-bit WAV 和 320 kbps MP3 导出，试听与下载。
 - SQLite 持久化、本机访问限制、同源写入校验、上传大小和磁盘余量检查。
@@ -42,19 +43,24 @@ uv run python scripts/start_background.py
 
 ## 安装 AI 推理环境
 
-本轮检测到的硬件是 macOS 15.3.2、Apple M4 Pro、24 GB 内存。首次检测磁盘仅剩约 3.9 GB，因此未安装 PyTorch 或下载大型模型。资产管理和直接混音可立即使用；AI 任务会显示具体的缺失环境或空间错误，不会生成模拟结果。
+当前硬件是 macOS 15.3.2、Apple M4 Pro、24 GB 内存。用户已授权使用系统盘继续安装；项目 `models/` 内的推理环境和全部模型已安装、校验，MPS 可用。已使用上游真实音频完成 6 秒、10 步的分离、转换和 WAV/MP3 导出测试，样例保留在作品库中。
 
-先在容量充足的位置预留至少 30 GB，建议 60 GB，然后运行：
+已取消没有实测依据的 30 GiB 固定门槛。安装脚本依据存储清单中的模型、依赖和源码字节数检查空间，另保留 2 GiB 构建工作余量及默认 5 GiB 系统余量。模型与配置文件合计为 **2,570,455,151 字节**；完整清单见 [存储清单](docs/STORAGE_INVENTORY.md)。系统盘安装命令：
 
 ```sh
-uv run python scripts/setup_ai.py --models-dir '/Volumes/你的SSD/ai-cover/models'
+uv run python scripts/setup_ai.py --models-dir models --source-cdn
+models/runtime/bin/python scripts/download_models.py --models-dir models --hf-endpoint https://hf-mirror.com
 ```
 
-安装脚本创建独立 Python 3.10 环境，安装固定的 PyTorch 2.5.1、torchaudio 2.5.1、Demucs 4.0.1 和歌声转换所需依赖；固定 Seed-VC 提交为 `51383efd921027683c89e5348211d93ff12ac2a8`。`scripts/ai-requirements.lock` 已在 Apple Silicon / Python 3.10 上完成依赖解析，固定全部间接依赖。脚本完成依赖导入检查后才保存 `settings.json`。权重由上游在首次推理时下载，首次使用需要网络；下载完成后相同模型可离线运行。
+安装脚本创建独立 Python 3.10 环境，优先复用本机已有解释器，安装锁定的 104 个依赖；固定 Seed-VC 提交为 `51383efd921027683c89e5348211d93ff12ac2a8`。`--source-cdn` 仅取得推理所需的 64 个源码文件，使用官方 GitHub 文件清单逐个验证 Git 对象哈希，省去未使用的示例、附带权重和 Git 历史。网络可直连 GitHub 时可省略该参数使用 Git，或用 `--source-archive` 下载官方完整压缩包。
 
-上游安装与命令参数参考 [Seed-VC 官方仓库](https://github.com/Plachtaa/seed-vc) 和 [Demucs 官方仓库](https://github.com/facebookresearch/demucs)。Seed-VC 仓库已归档，故采用固定版本并隔离依赖；当前机器受空间限制，尚未实际验证该环境的安装或模型推理。
+脚本完成依赖导入检查后才保存 `settings.json`。模型下载脚本只下载清单中的必要文件并校验大小与 SHA256，在实际加载的缓存目录留下 `install-manifest.json`；文件齐全时应用自动启用离线加载。下载未完成时不会宣称权重就绪，可重复运行下载脚本继续已有缓存。
 
-歌声转换使用 V1 的 44.1 kHz F0 模型，参数为 `--f0-condition True --length-adjust 1.0 --auto-f0-adjust False --fp16 False`。Seed-VC 按上游实现自动选择 MPS/CUDA/CPU；Demucs 默认 CPU，以保持 Mac 上的兼容性，可在设置中切换 MPS。上游 Seed-VC 的部分检查点写在其项目 `checkpoints/` 下，所以项目本身也放在指定模型目录内。
+上游安装与命令参数参考 [Seed-VC 官方仓库](https://github.com/Plachtaa/seed-vc) 和 [Demucs 官方仓库](https://github.com/facebookresearch/demucs)。Seed-VC 仓库已归档，因此采用固定版本并隔离依赖。
+
+歌声转换使用 V1 的 44.1 kHz F0 模型，参数为 `--f0-condition True --length-adjust 1.0 --auto-f0-adjust False --fp16 False`。Seed-VC 按上游实现自动选择 MPS/CUDA/CPU；Demucs 默认 CPU，以保持 Mac 上的兼容性，可在设置中切换 MPS。项目通过 `scripts/seed_inference.py` 运行未修改的上游代码：将 RMVPE 音高数组转为 float32，避免 MPS 不支持 float64；在 MPS 模式下将 BigVGAN 波形生成放到 CPU，避开 PyTorch 2.5.1 的卷积尺寸限制，其余转换计算仍使用 MPS。上游 Seed-VC 的部分检查点写在其项目 `checkpoints/` 下，所以项目本身也放在指定模型目录内。
+
+2026-09-30 16:56 CST 的安装实测：`models/` 目录分配空间为 **4,581,351,424 字节（4.58 GB）**，包含模型、独立运行环境及 uv 缓存；当时系统盘可用空间为 **12,375,764,992 字节（12.38 GB）**。目录统计可能包含 APFS 共享块，不代表唯一物理占用；各项明细见存储清单。
 
 ## 存储位置
 
@@ -83,7 +89,7 @@ COVER_DATA_DIR='/Volumes/你的SSD/ai-cover/data' sh scripts/run.sh
 
 `COVER_DATA_DIR` 必须在每次启动时保持一致。迁移已有资产库时先停止应用，将整个 `data/` 目录（包含数据库）移动到新位置，再用新路径启动。模型目录可由安装脚本配置，也可设置 `COVER_MODELS_DIR`；环境变量优先于设置页面的值。
 
-完成任务自动清理重复的临时音频，保留正式分离素材和导出作品。失败或取消任务的临时文件保留用于排查，可在任务列表删除任务记录时清理；删除任务记录不会删除已发布的作品。
+完成任务自动清理重复的临时音频，保留正式分离素材、转换后干声和导出作品。转换后干声可在素材库试听、下载，也可用“直接混音”调整增益与同步，无需重新推理。失败或取消任务的临时文件保留用于排查，可在任务列表删除任务记录时清理；删除任务记录不会删除已发布的作品。
 
 ## 验证
 
@@ -101,14 +107,22 @@ node scripts/smoke-browser.cjs
 
 浏览器检查使用 Playwright，覆盖桌面/手机布局、素材上传、播放、歌词编辑和混音导出，截图写入 `artifacts/`。需先启动应用，默认地址为 `http://127.0.0.1:8765`；通过 `COVER_URL` 可覆盖。
 
+真实模型流程检查（会在素材库和作品库留下样例）：
+
+```sh
+uv run python scripts/smoke_ai.py
+```
+
+默认取得校验过的上游音频，截取 6 秒并以 10 步运行完整流程；通过 `--source '/实际歌曲路径' --reference '/实际参考人声路径'` 使用自己的素材。结果写入 `artifacts/ai-validation/result.json`，检查真实模型执行、分离与导出时长、非空波形及下载。当前样例的分离人声能量较低，主要用于验证流程联通，不评价音色相似度或完整歌曲听感；短片段耗时也不能直接推算整首歌或默认 30 步的耗时。
+
 ## 当前限制
 
-- 尚未使用用户实际的参考人声和歌曲做音色相似度、高音、气声及同步听感验收。
-- 完整 AI 流程需要足够的磁盘空间、完成推理环境安装和模型下载。
+- 已导入用户的录音、三份音色成品和目标歌曲，完成四组短片段对照及《我和我的祖国》整首转换，详见 [个人翻唱结果](docs/PERSONAL_COVER_RESULTS.md)。用户主观音色相似度、高音、气声及咬字听感仍需试听验收。
+- 本轮 188.6 秒歌曲、50 步全曲流程耗时约 17 分钟；不同歌曲和参数的耗时、严格存储峰值不能据此固定。
 - 阶段进度表示流程阶段，不是模型推理剩余时间估算；详细进度见任务日志。
 - 当前只支持单进程启动，避免同一任务队列被多个应用进程同时执行。
 - 上游组件各自保留原有许可：Seed-VC 为 GPL-3.0，Demucs 为 MIT，Lucide 为 ISC。
 
 ## SSD 接入后继续
 
-目前等待外置 SSD，暂停模型安装与下载。后续推进步骤和可直接使用的提示词见 [SSD 续接提示词](docs/RESUME_AFTER_SSD.md)。
+当前已改为在系统盘推进。日后接入 SSD 时，可将模型和音频迁移到外置盘；迁移准备和提示词见 [SSD 续接提示词](docs/RESUME_AFTER_SSD.md)。
