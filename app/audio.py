@@ -163,6 +163,33 @@ def mix_command(
     ]
 
 
+def enhance_command(source: Path, target: Path) -> list[str]:
+    # Light vocal polish: cut rumble, de-ess, gentle compression, presence lift.
+    # Output stays 32-bit float so later gain staging and mixing are unchanged.
+    return [
+        "ffmpeg",
+        "-nostdin",
+        "-y",
+        "-v",
+        "error",
+        "-i",
+        str(source),
+        "-vn",
+        "-af",
+        "highpass=f=70,"
+        "deesser,"
+        "acompressor=threshold=-18dB:ratio=2:attack=15:release=200:makeup=2,"
+        "equalizer=f=3200:t=q:w=1:g=1.5",
+        "-ar",
+        "44100",
+        "-ac",
+        "2",
+        "-c:a",
+        "pcm_f32le",
+        str(target),
+    ]
+
+
 def mp3_command(source: Path, target: Path) -> list[str]:
     return [
         "ffmpeg",

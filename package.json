@@ -2,6 +2,7 @@
   "name": "ai-cover-browser-checks",
   "private": true,
   "scripts": {
+    "start": "sh scripts/run.sh",
     "test:browser": "node scripts/smoke-browser.cjs"
   },
   "devDependencies": {

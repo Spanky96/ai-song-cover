@@ -447,3 +447,54 @@ def test_preview_window_trims_song_before_separation(client, application, monkey
     outputs = [a for a in generated if a["kind"] == "output"]
     assert all(a["duration"] == pytest.approx(4, abs=0.5) for a in outputs)
     assert all(a["metadata"].get("role") == "preview" for a in outputs)
+
+def test_enhance_command_uses_polish_chain():
+    command = audio.enhance_command(Path("in.wav"), Path("out.wav"))
+    filters = command[command.index("-af") + 1]
+    assert "highpass=f=70" in filters
+    assert "deesser" in filters
+    assert "acompressor" in filters
+    assert "equalizer=f=3200" in filters
+    assert "pcm_f32le" in command
+
+
+def test_vocal_enhance_stage_keeps_pipeline_working(client, application, monkeypatch):
+    source = upload(client, make_wav(seconds=3), "vocal")
+    voice = upload(client, make_wav(seconds=2), "voice")
+    engines = application.state.engines
+    monkeypatch.setattr(engines, "validate", lambda *_: [])
+    monkeypatch.setattr(
+        engines,
+        "seed_command",
+        lambda source, reference, output, params: [
+            sys.executable,
+            "-c",
+            "import sys, shutil; from pathlib import Path; "
+            "shutil.copyfile(sys.argv[1], Path(sys.argv[2])/'vc_stub.wav')",
+            str(source),
+            str(output),
+        ],
+    )
+    application.state.settings.seed_repo.mkdir(parents=True)
+    created = client.post(
+        "/api/jobs",
+        json={"source_id": source["id"], "voice_id": voice["id"], "vocal_enhance": True},
+    )
+    assert created.status_code == 201
+    finished = wait_job(client, created.json()["id"])
+    assert finished["state"] == "completed", finished["error"]
+    converted = next(
+        a
+        for a in client.get("/api/assets").json()
+        if a["metadata"].get("job_id") == finished["id"]
+        and a["metadata"].get("role") == "converted_vocal"
+    )
+    assert converted["duration"] == pytest.approx(3, abs=0.5)
+
+def test_shell_and_static_send_revalidation_cache_headers(client):
+    shell = client.get("/")
+    assert shell.status_code == 200
+    assert shell.headers["cache-control"] == "no-store"
+    static = client.get("/static/app.js")
+    assert static.status_code == 200
+    assert static.headers["cache-control"] == "no-cache"

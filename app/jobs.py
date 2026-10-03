@@ -265,6 +265,11 @@ class JobManager:
                 if len(candidates) != 1:
                     raise RuntimeError("Seed-VC 未产生唯一的转换结果。")
                 vocal = candidates[0]
+                if params.get("vocal_enhance"):
+                    self.db.update_job(job_id, stage="人声增强", progress=70)
+                    enhanced = work / "enhanced.wav"
+                    self._run(job_id, audio.enhance_command(vocal, enhanced), event)
+                    vocal = enhanced
             self.db.update_job(job_id, stage="混音与同步", progress=80)
             duration = (
                 audio.probe(vocal)["duration"] if preview_seconds else source_asset["duration"]

@@ -201,19 +201,43 @@ async function noHorizontalOverflow(page, label) {
   await page.goto(`${url}/#studio`);
   await page.waitForSelector("#job-form");
   assert(
-    await page.locator('#job-form button[data-preview="1"]').count(),
-    "Preview submit button missing",
+    await page.locator('#job-form button[data-separate-song]').count(),
+    "Separate CTA missing for unseparated song",
+  );
+  await page.locator("#job-form button[data-separate-song]").click();
+  await page.waitForSelector("#job-form .track", { timeout: 120000 });
+  assert.equal(
+    await page.locator("#job-form .track").count(),
+    2,
+    "Separated tracks missing",
   );
   assert(
     await page.locator('#job-form input[name="start_seconds"]').count(),
-    "Preview start field missing",
+    "Region start field missing after separation",
   );
-  assert.equal(
-    await page
-      .locator('select[name="instrumental_id"] option')
-      .first()
-      .textContent(),
-    "使用原曲分离伴奏",
+  assert(
+    await page.locator('#job-form button[data-audition="segment"]').count(),
+    "Audition segment button missing",
+  );
+  const regionBefore = await page
+    .locator("#job-form .track-region")
+    .first()
+    .getAttribute("style");
+  const trackBox = await page
+    .locator("#job-form .track-body[data-select-track]")
+    .boundingBox();
+  assert(trackBox, "Selectable track body missing");
+  await page.mouse.move(trackBox.x + trackBox.width * 0.2, trackBox.y + 10);
+  await page.mouse.down();
+  await page.mouse.move(trackBox.x + trackBox.width * 0.6, trackBox.y + 10, {
+    steps: 6,
+  });
+  await page.mouse.up();
+  await page.waitForFunction(
+    (before) =>
+      document.querySelector("#job-form .track-region")?.getAttribute("style") !==
+      before,
+    regionBefore,
   );
   await page.getByRole("button", { name: "直接混音", exact: true }).click();
   const assets = await (await request.get(`${url}/api/assets`)).json();
@@ -230,6 +254,9 @@ async function noHorizontalOverflow(page, label) {
   await page
     .locator('#job-form input[name="name"]')
     .fill("浏览器验收混音（测试音频）");
+  // UI 默认仅 MP3；冒烟显式补勾 WAV，继续覆盖双格式导出。
+  const wavBox = page.locator('#job-form input[name="formats"][value="wav"]');
+  if (!(await wavBox.isChecked())) await wavBox.check();
   const submission = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&

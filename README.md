@@ -22,8 +22,10 @@
 需要 `uv`、Python 3.12 和 FFmpeg。此机器已安装 uv、Python 3.12 与 FFmpeg。
 
 ```sh
-sh scripts/run.sh
+npm start
 ```
+
+等价于 `sh scripts/run.sh`（用 uv 固定依赖启动）。
 
 打开 <http://127.0.0.1:8765>。已有服务占用端口时：
 

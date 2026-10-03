@@ -51,6 +51,7 @@ class JobRequest(BaseModel):
     offset_ms: int = Field(default=0, ge=-10000, le=10000)
     start_seconds: float = Field(default=0, ge=0, le=1800)
     preview_seconds: float = Field(default=0, ge=0, le=1800)
+    vocal_enhance: bool = False
     formats: list[Literal["wav", "mp3"]] = Field(default=["wav", "mp3"], min_length=1)
 
 
@@ -79,6 +80,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.db = db
     application.state.engines = engines
     application.state.manager = manager
+
+    @application.middleware("http")
+    async def cache_headers(request: Request, call_next):
+        # Browsers must always revalidate the shell so UI updates appear on refresh.
+        response = await call_next(request)
+        if request.url.path == "/":
+            response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/static"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @application.middleware("http")
     async def local_requests(request: Request, call_next):

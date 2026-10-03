@@ -8,6 +8,7 @@ const state = {
   settings: null,
   page: "studio",
   songFilter: "all",
+  outputFilter: "full",
   search: "",
   selectedLyric: null,
   draft: {
@@ -26,9 +27,11 @@ const state = {
     offset_ms: 0,
     start_seconds: 35,
     preview_length: 18,
-    formats: ["wav", "mp3"],
+    vocal_enhance: false,
+    formats: ["mp3"],
   },
   uploading: false,
+  audition: null, // { jobId, shown, error, gains, convert, iterations: [] }
 };
 const pageNames = {
   studio: "创作工作台",
@@ -84,6 +87,11 @@ const date = (value) =>
 const ext = (asset) => asset.path.split(".").pop().toUpperCase();
 const byId = (id) => state.assets.find((asset) => asset.id === id);
 const assetsOf = (kind) => state.assets.filter((asset) => asset.kind === kind);
+// 整曲成品计入总数；试听片段与短片段折叠展示，不计入。
+const isFullOutput = (asset) =>
+  asset.duration >= 60 && asset.metadata?.role !== "preview";
+const fullOutputs = () => assetsOf("output").filter(isFullOutput);
+const fragmentOutputs = () => assetsOf("output").filter((a) => !isFullOutput(a));
 const iconButton = (name, label, attributes = "", danger = false) =>
   `<button type="button" class="icon-button${danger ? " danger" : ""}" title="${esc(label)}" aria-label="${esc(label)}" ${attributes}>${icon(name)}</button>`;
 
@@ -122,6 +130,8 @@ function toast(message) {
 function finishRender() {
   if (window.lucide) lucide.createIcons();
   document.querySelectorAll("canvas[data-asset]").forEach(drawWave);
+  if (combinedPlayback) tickCombinedIndicators();
+  else paintElementTrackIndicators();
 }
 
 function drawWave(canvas) {
@@ -178,7 +188,7 @@ function updateChrome() {
   $("#song-count").textContent = state.assets.filter((a) =>
     ["song", "instrumental", "vocal"].includes(a.kind),
   ).length;
-  $("#output-count").textContent = assetsOf("output").length;
+  $("#output-count").textContent = fullOutputs().length;
   $("#environment-label").textContent = environmentReady()
     ? "推理环境就绪"
     : "推理环境待配置";
@@ -261,8 +271,8 @@ function renderStudio() {
       ? `<section class="form-section">${fieldTitle("02", "目标音色", `<button type="button" class="text-link" data-upload="voice">${icon("plus")}导入音色</button>`)}${voices.length ? `<select name="voice_id" aria-label="选择目标音色">${optionList(voices, draft.voice_id, "选择参考音色")}</select>${preview(byId(draft.voice_id))}` : `<button type="button" class="upload-empty" data-upload="voice">${icon("mic")}<span>添加我的参考音色</span><small>1 至 30 秒 · 干净人声</small></button>`}</section>`
       : "";
   const accompaniment =
-    draft.job_type !== "separate"
-      ? `<section class="form-section">${fieldTitle(draft.job_type === "cover" ? "03" : "02", "伴奏与歌词", `<span class="optional">可选</span>`)}<div class="form-grid"><label class="field"><span>伴奏 ${`<button type="button" class="text-link" style="float:right" data-upload="instrumental">${icon("plus")}导入</button>`}</span><select name="instrumental_id" aria-label="选择伴奏">${optionList(instrumentals, draft.instrumental_id, source?.kind === "song" ? "使用原曲分离伴奏" : "不添加伴奏")}</select></label><label class="field"><span>歌词归档 <a href="#lyrics" class="text-link" style="float:right">${icon("notebook-pen")}</a></span><select name="lyric_id" aria-label="选择归档歌词"><option value="">不归档歌词</option>${state.lyrics.map((l) => `<option value="${l.id}" ${l.id === draft.lyric_id ? "selected" : ""}>${esc(l.name)} · v${l.version}</option>`).join("")}</select></label></div></section>`
+    draft.job_type === "mix"
+      ? `<section class="form-section">${fieldTitle("02", "伴奏与歌词", `<span class="optional">可选</span>`)}<div class="form-grid"><label class="field"><span>伴奏 ${`<button type="button" class="text-link" style="float:right" data-upload="instrumental">${icon("plus")}导入</button>`}</span><select name="instrumental_id" aria-label="选择伴奏">${optionList(instrumentals, draft.instrumental_id, "不添加伴奏")}</select></label><label class="field"><span>歌词归档 <a href="#lyrics" class="text-link" style="float:right">${icon("notebook-pen")}</a></span><select name="lyric_id" aria-label="选择归档歌词"><option value="">不归档歌词</option>${state.lyrics.map((l) => `<option value="${l.id}" ${l.id === draft.lyric_id ? "selected" : ""}>${esc(l.name)} · v${l.version}</option>`).join("")}</select></label></div></section>`
       : "";
   const notice = !environmentReady()
     ? `<div class="notice">${icon("hard-drive")}<span>${state.status?.storage.model_space_ok ? "AI 推理环境尚未安装。" : "磁盘剩余空间不足，模型下载尚未开始。"}</span><a href="#settings" class="text-link">配置环境 ${icon("arrow-up-right")}</a></div>`
@@ -270,7 +280,7 @@ function renderStudio() {
   return (
     pageHeading("AI 翻唱工作室", "我的声音，我的演唱。") +
     notice +
-    `<div class="overview"><div class="overview-item"><div class="overview-icon">${icon("mic")}</div><div><strong>${voices.length}</strong><span>参考音色</span></div></div><div class="overview-item"><div class="overview-icon">${icon("disc-3")}</div><div><strong>${assetsOf("song").length + assetsOf("vocal").length}</strong><span>演唱素材</span></div></div><div class="overview-item"><div class="overview-icon">${icon("headphones")}</div><div><strong>${assetsOf("output").length}</strong><span>已导出作品</span></div></div></div><div class="studio-grid"><section class="composer"><div class="section-heading"><h2>新建创作</h2><span class="subtle-label">${draft.job_type === "cover" ? "歌声转换" : draft.job_type === "mix" ? "音频混音" : "双轨分离"}</span></div><div class="mode-tabs" role="group" aria-label="创作模式">${[
+    `<div class="overview"><div class="overview-item"><div class="overview-icon">${icon("mic")}</div><div><strong>${voices.length}</strong><span>参考音色</span></div></div><div class="overview-item"><div class="overview-icon">${icon("disc-3")}</div><div><strong>${assetsOf("song").length + assetsOf("vocal").length}</strong><span>演唱素材</span></div></div><div class="overview-item"><div class="overview-icon">${icon("headphones")}</div><div><strong>${fullOutputs().length}</strong><span>已导出作品</span></div></div></div><div class="studio-grid"><section class="composer"><div class="section-heading"><h2>新建创作</h2><span class="subtle-label">${draft.job_type === "cover" ? "歌声转换" : draft.job_type === "mix" ? "音频混音" : "双轨分离"}</span></div><div class="mode-tabs" role="group" aria-label="创作模式">${[
       ["cover", "sparkles", "AI 翻唱"],
       ["separate", "split", "人声分离"],
       ["mix", "audio-lines", "直接混音"],
@@ -281,7 +291,7 @@ function renderStudio() {
       )
       .join(
         "",
-      )}</div><form id="job-form">${sourceMarkup}${voiceField}${accompaniment}${draft.job_type !== "separate" ? renderMixFields() : ""}${draft.job_type !== "separate" ? renderPreviewFields() : ""}<label class="field"><span>作品名称</span><input type="text" name="name" maxlength="120" value="${esc(draft.name)}" placeholder="${esc(byId(draft.source_id)?.name || "未命名作品")}"></label><div class="submit-row">${draft.job_type !== "separate" ? `<button class="button secondary" type="submit" data-preview="1">${icon("headphones")}试听片段</button>` : ""}<button class="button primary" id="generate-button" type="submit">${icon(draft.job_type === "cover" ? "sparkles" : "play")}${draft.job_type === "cover" ? "生成翻唱" : draft.job_type === "mix" ? "开始混音" : "分离音频"}</button><small>${draft.job_type === "cover" ? "原曲旋律与歌词" : draft.job_type === "mix" ? "WAV / MP3" : "人声 / 伴奏"}</small></div><div class="form-error" id="job-error" role="alert"></div></form></section><aside class="activity"><section><div class="section-heading"><h2>最近任务</h2><a href="#jobs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-jobs">${renderRecentJobs()}</div></section><section class="recent-section"><div class="section-heading"><h2>最近作品</h2><a href="#outputs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-outputs">${renderRecentOutputs()}</div></section></aside></div>`
+      )}</div><form id="job-form">${sourceMarkup}${voiceField}<div id="region-panel">${draft.job_type === "cover" ? renderRegionSection() : ""}</div>${accompaniment}${draft.job_type !== "separate" ? renderMixFields() : ""}<label class="field"><span>作品名称</span><input type="text" name="name" maxlength="120" value="${esc(draft.name)}" placeholder="${esc(byId(draft.source_id)?.name || "未命名作品")}"></label><div class="submit-row">${draft.job_type === "cover" ? `<button type="button" class="button primary" data-audition="segment">${icon("headphones")}转换选中区间</button><button type="button" class="button secondary" data-audition="full">${icon("sparkles")}用当前参数生成整曲</button><small>先试听区间（约 1–2 分钟），满意后再生成整曲（约 20 分钟）</small>` : `<button class="button primary" id="generate-button" type="submit">${icon(draft.job_type === "mix" ? "play" : "split")}${draft.job_type === "mix" ? "开始混音" : "分离音频"}</button><small>${draft.job_type === "mix" ? "WAV / MP3" : "人声 / 伴奏"}</small>`}</div><div class="form-error" id="job-error" role="alert"></div></form></section><aside class="activity"><div id="audition-panel">${renderAuditionInner()}</div><section><div class="section-heading"><h2>最近任务</h2><a href="#jobs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-jobs">${renderRecentJobs()}</div></section><section class="recent-section"><div class="section-heading"><h2>最近作品</h2><a href="#outputs" class="text-link">全部 ${icon("arrow-right")}</a></div><div id="studio-outputs">${renderRecentOutputs()}</div></section></aside></div>`
   );
 }
 
@@ -289,13 +299,120 @@ function renderMixFields() {
   const d = state.draft;
   const range = (name, title, min, max, suffix) =>
     `<label class="field"><span>${title}</span><div class="range-field"><input name="${name}" type="range" min="${min}" max="${max}" value="${d[name]}" step="1" aria-label="${title}"><output data-output="${name}">${d[name]} ${suffix}</output></div></label>`;
-  return `<section class="form-section"><div class="form-grid">${range("vocal_gain_db", "人声音量", -24, 12, "dB")}${range("instrumental_gain_db", "伴奏音量", -24, 12, "dB")}</div></section><details class="advanced"><summary>高级参数 ${icon("chevron-down")}</summary><div class="form-grid">${d.job_type === "cover" ? `<label class="field"><span>推理步数</span><select name="diffusion_steps" aria-label="推理步数">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option ${d.diffusion_steps === n ? "selected" : ""} value="${n}">${n}</option>`).join("")}</select></label><label class="field"><span>人声移调 / 半音</span><input name="pitch_shift" type="number" min="-12" max="12" step="1" value="${d.pitch_shift}"></label><label class="field"><span>音色引导强度</span><input name="cfg_rate" type="number" min="0" max="1" step="0.05" value="${d.cfg_rate}"></label>` : ""}<label class="field"><span>人声时间偏移 / ms</span><input name="offset_ms" type="number" min="-10000" max="10000" step="10" value="${d.offset_ms}" title="正值延后人声，负值提前人声"></label></div></details><div class="form-grid" style="margin-bottom:20px"><label class="field"><span>导出格式</span><div class="export-options"><label><input type="checkbox" name="formats" value="wav" ${d.formats.includes("wav") ? "checked" : ""}> WAV</label><label><input type="checkbox" name="formats" value="mp3" ${d.formats.includes("mp3") ? "checked" : ""}> MP3</label></div></label></div>`;
+  return `<section class="form-section"><div class="form-grid">${range("vocal_gain_db", "人声音量", -24, 12, "dB")}${range("instrumental_gain_db", "伴奏音量", -24, 12, "dB")}</div></section><details class="advanced"><summary>高级参数 ${icon("chevron-down")}</summary><div class="form-grid">${d.job_type === "cover" ? `<label class="field"><span>推理步数</span><select name="diffusion_steps" aria-label="推理步数">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option ${d.diffusion_steps === n ? "selected" : ""} value="${n}">${n}</option>`).join("")}</select></label><label class="field"><span>人声移调 / 半音</span><input name="pitch_shift" type="number" min="-12" max="12" step="1" value="${d.pitch_shift}"><small class="subtle-label">同性别翻唱一般无需调整；男转女通常 +5~+12；女转男通常 -5~-12</small></label><label class="field"><span>音色引导强度</span><input name="cfg_rate" type="number" min="0" max="1" step="0.05" value="${d.cfg_rate}"></label><label class="field"><span>人声增强</span><div class="export-options"><label><input type="checkbox" name="vocal_enhance" ${d.vocal_enhance ? "checked" : ""}> 轻度精修</label></div><small class="subtle-label">去齿音、轻压缩、提升亮度，修复转换瑕疵</small></label>` : ""}<label class="field"><span>人声时间偏移 / ms</span><input name="offset_ms" type="number" min="-10000" max="10000" step="10" value="${d.offset_ms}" title="正值延后人声，负值提前人声"></label></div></details><div class="form-grid" style="margin-bottom:20px"><label class="field"><span>导出格式</span><div class="export-options"><label><input type="checkbox" name="formats" value="wav" ${d.formats.includes("wav") ? "checked" : ""}> WAV</label><label><input type="checkbox" name="formats" value="mp3" ${d.formats.includes("mp3") ? "checked" : ""}> MP3</label></div><small class="subtle-label">MP3 体积小、便于分享试听；WAV 是无损母带，仅需要存档或后期再加工时勾选</small></label></div>`;
 }
 
-function renderPreviewFields() {
+// ---- 剪辑式音轨与试听区间 ----
+
+function pendingSeparation(songId) {
+  return state.jobs.find(
+    (j) =>
+      j.params.job_type === "separate" &&
+      j.params.source_id === songId &&
+      activeStates.includes(j.state),
+  );
+}
+
+function separationFor(songId) {
+  const job = state.jobs.find(
+    (j) =>
+      j.params.job_type === "separate" &&
+      j.params.source_id === songId &&
+      j.state === "completed",
+  );
+  if (!job) return null;
+  const stems = state.assets.filter((a) => a.metadata?.job_id === job.id);
+  const vocal = stems.find((a) => a.kind === "vocal");
+  const instrumental = stems.find((a) => a.kind === "instrumental");
+  return vocal && instrumental ? { job, vocal, instrumental } : null;
+}
+
+// Cover-mode source: separated stems for a song, or the dry vocal itself.
+function coverStems() {
+  const source = byId(state.draft.source_id);
+  if (!source) return { vocal: null, instrumental: null };
+  if (source.kind === "song") {
+    const separated = separationFor(source.id);
+    return separated
+      ? { vocal: separated.vocal, instrumental: separated.instrumental }
+      : { vocal: null, instrumental: null };
+  }
+  return { vocal: source, instrumental: byId(state.draft.instrumental_id) || null };
+}
+
+function regionOf(duration) {
+  const start = Math.max(
+    0,
+    Math.min(state.draft.start_seconds, Math.max(0, Math.floor(duration) - 5)),
+  );
+  const length = Math.max(5, Math.min(state.draft.preview_length, duration - start));
+  return { start, length };
+}
+
+function trackRow(asset, label, selectable) {
+  const { start, length } = regionOf(asset.duration);
+  const left = (start / asset.duration) * 100;
+  const width = (length / asset.duration) * 100;
+  return `<div class="track"><div class="track-head"><button type="button" class="play-mini" data-play="${asset.id}" title="试听整轨" aria-label="试听整轨">${icon("play")}</button><div class="asset-meta"><strong>${esc(label)}</strong><small>${time(asset.duration)}</small></div></div><div class="track-body" data-play-track="${asset.id}"${selectable ? ` data-select-track="${asset.id}" title="拖拽框选区间，单击试听当前区间"` : ` title="单击试听当前区间"`}><canvas data-asset="${asset.id}" aria-label="音频波形"></canvas><div class="track-region${selectable ? "" : " readonly"}" style="left:${left}%;width:${width}%"><span class="handle"></span><span class="handle right"></span></div><div class="track-window-progress" hidden></div><div class="track-playhead" hidden></div></div></div>`;
+}
+
+function renderRegionSection() {
   const d = state.draft;
   const source = byId(d.source_id);
-  return `<section class="form-section"><div class="field-heading"><span class="field-title">${icon("headphones")}试听片段</span><span class="optional">快速调参</span></div><div class="form-grid"><label class="field"><span>起点 / 秒${source ? `（全长 ${time(source.duration)}）` : ""}</span><input name="start_seconds" type="number" min="0" step="1" value="${d.start_seconds}" aria-label="片段起点秒数"></label><label class="field"><span>片段时长</span><select name="preview_length" aria-label="片段时长">${[10, 18, 30].map((n) => `<option ${Number(d.preview_length) === n ? "selected" : ""} value="${n}">${n} 秒</option>`).join("")}</select></label></div><small class="subtle-label">只转换选中片段，快速比较参数；满意后再生成整曲。</small></section>`;
+  if (!source) return "";
+  let body;
+  if (source.kind === "song") {
+    const pending = pendingSeparation(source.id);
+    const separated = separationFor(source.id);
+    if (separated) {
+      const { start, length } = regionOf(separated.vocal.duration);
+      body = `<div class="track-stack">${trackRow(separated.vocal, "原唱人声", true)}${trackRow(separated.instrumental, "伴奏", false)}</div><div class="form-grid" style="margin-top:12px"><label class="field"><span>区间起点 / 秒</span><input name="start_seconds" type="number" min="0" step="1" value="${start}" aria-label="区间起点秒数"></label><label class="field"><span>区间时长 / 秒</span><input name="preview_length" type="number" min="5" max="60" step="1" value="${Math.round(length)}" aria-label="区间时长秒数"></label></div><small class="subtle-label">拖拽框选区间、单击波形从区间开始播放（播完自动继续整曲）；「人声+伴奏」按当前音量合播区间；播放时波形上有播放头与进度指示。</small>`;
+    } else if (pending) {
+      body = `<div class="separate-progress"><strong>${esc(pending.name)}</strong><div class="progress-track"><span style="width:${pending.progress}%"></span></div><small>${esc(pending.stage)} · ${pending.progress}%</small></div>`;
+    } else {
+      body = `<button type="button" class="button primary" data-separate-song="${source.id}">${icon("split")}先分离人声与伴奏</button><small class="subtle-label">分离一次即可：之后选区间转换、生成整曲都复用这两条音轨。</small>`;
+    }
+  } else {
+    const instrumental = byId(d.instrumental_id);
+    body = `${trackRow(source, "干声", true)}${instrumental ? trackRow(instrumental, "伴奏", false) : `<div class="form-grid"><label class="field"><span>伴奏（可选）</span><select name="instrumental_id" aria-label="选择伴奏">${optionList(assetsOf("instrumental"), d.instrumental_id, "不添加伴奏")}</select></label></div>`}<div class="form-grid" style="margin-top:12px"><label class="field"><span>区间起点 / 秒</span><input name="start_seconds" type="number" min="0" step="1" value="${Math.max(0, Math.min(d.start_seconds, Math.floor(source.duration) - 5))}" aria-label="区间起点秒数"></label><label class="field"><span>区间时长 / 秒</span><input name="preview_length" type="number" min="5" max="60" step="1" value="${Math.max(5, Math.min(d.preview_length, source.duration - d.start_seconds))}" aria-label="区间时长秒数"></label></div>`;
+  }
+  const stems = coverStems();
+  const combinedAction =
+    stems.vocal && stems.instrumental
+      ? `<button type="button" class="text-link" data-play-combined title="播放区间内人声+伴奏合音；播放中拖动下方音量滑杆可实时调节对应音轨">${icon("layers")}人声+伴奏</button>`
+      : `<span class="optional">拖拽框选</span>`;
+  return `<section class="form-section">${fieldTitle("03", "试听区间", combinedAction)}${body}</section>`;
+}
+
+// ---- 试听调参台：生成完成就地播放，音量秒级重混，音高/CFG 重新转换 ----
+
+function auditionJob() {
+  return state.audition ? state.jobs.find((j) => j.id === state.audition.jobId) : null;
+}
+
+function summarizeAudition(job) {
+  const p = job.params;
+  const parts = [`移调 ${p.pitch_shift > 0 ? "+" : ""}${p.pitch_shift}`];
+  if (p.job_type === "cover") parts.push(`CFG ${p.cfg_rate}`, `${p.diffusion_steps}步`);
+  parts.push(`人声 ${p.vocal_gain_db >= 0 ? "+" : ""}${p.vocal_gain_db}dB`, `伴奏 ${p.instrumental_gain_db}dB`);
+  return parts.join(" · ");
+}
+
+function renderAuditionInner() {
+  const audition = state.audition;
+  const job = auditionJob();
+  if (!audition || !job) return "";
+  if (job.state !== "completed") {
+    return `<section class="audition"><div class="section-heading"><h2>试听调参台</h2><button type="button" class="icon-button" data-audition-close title="关闭" aria-label="关闭">${icon("x")}</button></div><div class="audition-body"><strong class="audition-name">${esc(job.name)}</strong>${activeStates.includes(job.state) ? `<div class="progress-track"><span style="width:${job.progress}%"></span></div><small class="subtle-label">${esc(job.stage)} · ${job.progress}%，留在本页即可，完成后自动播放。</small>` : `<div class="job-error">${esc(job.error || stateNames[job.state])}</div>`}</div></section>`;
+  }
+  const output = job.outputs.map(byId).filter(Boolean);
+  const mp3 = output.find((a) => a.path.endsWith(".mp3")) || output[0];
+  const gains = audition.gains;
+  const convert = audition.convert;
+  const mixable = byId(job.params.source_id)?.kind === "vocal";
+  const remixable = mixable && (job.params.job_type === "cover" || job.params.job_type === "mix");
+  const convertible = job.params.job_type === "cover" && job.params.preview_seconds > 0;
+  return `<section class="audition"><div class="section-heading"><h2>试听调参台</h2><button type="button" class="icon-button" data-audition-close title="关闭" aria-label="关闭">${icon("x")}</button></div><div class="audition-body">${mp3 ? `<div class="audition-now"><button type="button" class="play-mini large" data-play="${mp3.id}" title="试听当前版本" aria-label="试听当前版本">${icon("play")}</button><div class="asset-meta"><strong>${esc(job.name)}</strong><small>${summarizeAudition(job)}</small></div></div>` : ""}${remixable ? `<div class="audition-group"><span class="audition-label">音量微调 · 秒级出新版</span><div class="form-grid"><label class="field"><span>人声音量</span><div class="range-field"><input type="range" min="-24" max="12" step="1" value="${gains.vocal_gain_db}" data-audition-gain="vocal_gain_db" aria-label="人声音量"><output>${gains.vocal_gain_db} dB</output></div></label><label class="field"><span>伴奏音量</span><div class="range-field"><input type="range" min="-24" max="12" step="1" value="${gains.instrumental_gain_db}" data-audition-gain="instrumental_gain_db" aria-label="伴奏音量"><output>${gains.instrumental_gain_db} dB</output></div></label></div><button type="button" class="button primary" data-audition-remix>${icon("refresh-cw")}更新混音并试听</button></div>` : ""}${convertible ? `<div class="audition-group"><span class="audition-label">重新转换 · 约 1–2 分钟</span><div class="form-grid"><label class="field"><span>人声移调 / 半音</span><input type="number" min="-12" max="12" step="1" value="${convert.pitch_shift}" data-audition-convert="pitch_shift"></label><label class="field"><span>音色引导强度</span><input type="number" min="0" max="1" step="0.05" value="${convert.cfg_rate}" data-audition-convert="cfg_rate"></label><label class="field"><span>推理步数</span><select data-audition-convert="diffusion_steps">${[10, 20, 30, 40, 50, 75, 100].map((n) => `<option ${Number(convert.diffusion_steps) === n ? "selected" : ""} value="${n}">${n}</option>`).join("")}</select></label></div><button type="button" class="button secondary" data-audition-reconvert>${icon("sparkles")}重新转换选中区间</button></div>` : ""}${convertible || remixable ? `<button type="button" class="button primary full-width" data-audition-full>${icon("disc-3")}满意了，用当前参数生成整曲（约 20 分钟）</button>` : ""}${audition.iterations.length > 1 ? `<div class="audition-history"><span class="audition-label">版本对比</span>${audition.iterations.map((item, index) => `<div class="iteration-row"><button type="button" class="play-mini" data-play="${item.mp3}" title="试听" aria-label="试听">${icon("play")}</button><div class="asset-meta"><strong>版本 ${audition.iterations.length - index}${index === 0 ? " · 最新" : ""}</strong><small>${esc(item.summary)}</small></div></div>`).join("")}</div>` : ""}</div></section>`;
 }
 
 function taskItem(job, full = false) {
@@ -325,7 +442,7 @@ function renderRecentJobs() {
 }
 
 function renderRecentOutputs() {
-  const outputs = assetsOf("output").slice(0, 3);
+  const outputs = fullOutputs().slice(0, 3);
   return outputs.length
     ? outputs
         .map(
@@ -397,15 +514,70 @@ function renderSongs() {
   );
 }
 
+function groupOutputsByJob(assets) {
+  const groups = new Map();
+  for (const asset of assets) {
+    const key = asset.metadata?.job_id || asset.id;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(asset);
+  }
+  return [...groups.entries()];
+}
+
+function outputRow(asset) {
+  return `<tr><td><div class="asset-cell"><button class="play-mini" data-play="${asset.id}" title="试听" aria-label="试听">${icon("play")}</button><div class="asset-meta"><strong>${ext(asset)} · ${(asset.sample_rate / 1000).toFixed(1)} kHz</strong><small>${asset.metadata?.role === "preview" ? "试听片段 · " : ""}${size(asset.size)}</small></div></div></td><td><canvas class="asset-wave" data-asset="${asset.id}" aria-label="音频波形"></canvas></td><td>${time(asset.duration)}</td><td>${size(asset.size)}</td><td>${rowActions(asset)}</td></tr>`;
+}
+
+function outputGroupTable(groups) {
+  return `<table class="asset-table"><thead><tr><th>作品</th><th>波形</th><th>时长</th><th>文件大小</th><th style="text-align:right">操作</th></tr></thead><tbody>${groups
+    .map(
+      ([, items]) =>
+        `<tr class="group-row"><td colspan="5"><strong title="${esc(items[0].name)}">${esc(items[0].name)}</strong><small>${date(items[0].created_at)} · ${items.length} 个文件</small></td></tr>${items
+          .map(outputRow)
+          .join("")}`,
+    )
+    .join("")}</tbody></table>`;
+}
+
 function renderOutputs() {
+  const filter = state.outputFilter || "full";
+  const full = fullOutputs();
+  const fragments = fragmentOutputs();
+  const tabs = `<div class="filter-bar"><div class="filter-tabs">${[
+    ["full", `整曲成品 ${full.length}`],
+    ["fragments", `试听与片段 ${fragments.length}`],
+    ["all", "全部"],
+  ]
+    .map(
+      ([key, label]) =>
+        `<button data-output-filter="${key}" class="${filter === key ? "active" : ""}">${label}</button>`,
+    )
+    .join("")}</div></div>`;
+  const emptyBlock = (text) =>
+    `<div class="table-empty">${empty("music-2", text)}</div>`;
+  let body = "";
+  if (filter !== "fragments")
+    body += full.length
+      ? outputGroupTable(groupOutputsByJob(full))
+      : emptyBlock("还没有完成的作品");
+  if (filter !== "full") {
+    const table = fragments.length
+      ? outputGroupTable(groupOutputsByJob(fragments))
+      : emptyBlock("没有试听或片段作品");
+    body =
+      filter === "all"
+        ? body +
+          `<details class="preview-fold"><summary>试听与片段（${fragments.length}）${icon("chevron-down")}</summary>${table}</details>`
+        : table;
+  }
   return (
     pageHeading(
       "我的作品",
-      `${assetsOf("output").length} 个音频文件`,
+      `${full.length} 个整曲成品`,
       `<a class="button primary" href="#studio">${icon("plus")}新建创作</a>`,
     ) +
-    renderSearch() +
-    `<div id="asset-results">${renderAssetTable(filterBySearch(assetsOf("output")), "还没有完成的作品")}</div>`
+    tabs +
+    `<div id="asset-results">${body}</div>`
   );
 }
 
@@ -558,12 +730,130 @@ $("#file-input").addEventListener("change", async (event) => {
   }
 });
 
+// ---- 参数构建与任务提交 ----
+
+function buildCoverParams(previewSeconds) {
+  const d = state.draft;
+  const stems = coverStems();
+  if (!stems.vocal) throw new Error("请先选择已分离的歌曲或干声来源。");
+  if (!d.voice_id) throw new Error("请先导入并选择目标音色。");
+  if (!d.formats.length) throw new Error("请选择至少一种导出格式。");
+  const region = regionOf(stems.vocal.duration);
+  const source = byId(d.source_id);
+  const base = `${source?.kind === "song" ? source.name : stems.vocal.name}`;
+  return {
+    job_type: "cover",
+    source_id: stems.vocal.id,
+    voice_id: d.voice_id,
+    instrumental_id: stems.instrumental?.id || null,
+    lyric_id: d.lyric_id || null,
+    diffusion_steps: d.diffusion_steps,
+    cfg_rate: d.cfg_rate,
+    pitch_shift: d.pitch_shift,
+    vocal_gain_db: d.vocal_gain_db,
+    instrumental_gain_db: d.instrumental_gain_db,
+    offset_ms: d.offset_ms,
+    vocal_enhance: d.vocal_enhance,
+    start_seconds: previewSeconds ? region.start : 0,
+    preview_seconds: previewSeconds ? region.length : 0,
+    formats: d.formats.length ? d.formats : ["mp3"],
+    name:
+      d.name.trim() ||
+      (previewSeconds
+        ? `试听 · ${base} · ${region.start}秒起`
+        : `${base} · 我的音色 · 完整版`),
+  };
+}
+
+async function startAuditionJob(params) {
+  const job = await api("/jobs", { method: "POST", body: JSON.stringify(params) });
+  state.audition = {
+    jobId: job.id,
+    shown: false,
+    error: null,
+    gains: {
+      vocal_gain_db: params.vocal_gain_db,
+      instrumental_gain_db: params.instrumental_gain_db,
+    },
+    convert: {
+      pitch_shift: params.pitch_shift,
+      cfg_rate: params.cfg_rate,
+      diffusion_steps: params.diffusion_steps,
+    },
+    // Keep the A/B history across reconvert / remix rounds; closing the panel clears it.
+    iterations: state.audition?.iterations || [],
+  };
+  await refreshData();
+  return job;
+}
+
+// ---- 波形区间拖拽 ----
+
+let dragSelect = null;
+document.addEventListener("pointerdown", (event) => {
+  const body = event.target.closest("[data-select-track]");
+  if (!body || event.button !== 0) return;
+  const duration = byId(body.dataset.selectTrack)?.duration || 0;
+  if (!duration) return;
+  const rect = body.getBoundingClientRect();
+  dragSelect = {
+    body,
+    rect,
+    duration,
+    anchor: ((event.clientX - rect.left) / rect.width) * duration,
+    range: null,
+  };
+  body.querySelector(".track-region")?.classList.add("dragging");
+  event.preventDefault();
+});
+window.addEventListener("pointermove", (event) => {
+  if (!dragSelect) return;
+  const { rect, duration, anchor } = dragSelect;
+  const current = Math.max(
+    0,
+    Math.min(duration, ((event.clientX - rect.left) / rect.width) * duration),
+  );
+  const a = Math.min(anchor, current);
+  const b = Math.max(anchor, current);
+  dragSelect.range = [a, b];
+  const region = dragSelect.body.querySelector(".track-region");
+  if (region) {
+    region.style.left = `${(a / duration) * 100}%`;
+    region.style.width = `${((b - a) / duration) * 100}%`;
+  }
+});
+window.addEventListener("pointerup", () => {
+  if (!dragSelect) return;
+  const [a, b] = dragSelect.range || [0, 0];
+  const trackId = dragSelect.body.dataset.selectTrack;
+  const duration = dragSelect.duration;
+  dragSelect.body.querySelector(".track-region")?.classList.remove("dragging");
+  dragSelect = null;
+  if (b - a >= 5) {
+    state.draft.start_seconds = Math.max(0, Math.floor(a * 2) / 2);
+    state.draft.preview_length = Math.max(5, Math.round(b - a));
+    render();
+  } else if (b - a < 0.3 && trackId) {
+    // 单击（未形成框选）：试听当前选中区间。
+    playAsset(trackId, regionOf(duration));
+  }
+});
+
+// 只读音轨（如伴奏）单击试听当前区间；可框选音轨由上面的 pointerup 处理。
+document.addEventListener("click", (event) => {
+  const body = event.target.closest("[data-play-track]");
+  if (!body || body.hasAttribute("data-select-track")) return;
+  const asset = byId(body.dataset.playTrack);
+  if (asset) playAsset(asset.id, regionOf(asset.duration));
+});
+
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button,[data-play]");
   if (!button) return;
   try {
     if (button.hasAttribute("data-close")) return $("#dialog").close();
     if (button.dataset.upload) return selectUpload(button.dataset.upload);
+    if (button.hasAttribute("data-play-combined")) return playCombinedRegion();
     if (button.dataset.play) return playAsset(button.dataset.play);
     if (button.dataset.mode) {
       state.draft.job_type = button.dataset.mode;
@@ -574,6 +864,11 @@ document.addEventListener("click", async (event) => {
     }
     if (button.dataset.filter) {
       state.songFilter = button.dataset.filter;
+      render();
+      return;
+    }
+    if (button.dataset.outputFilter) {
+      state.outputFilter = button.dataset.outputFilter;
       render();
       return;
     }
@@ -621,6 +916,76 @@ document.addEventListener("click", async (event) => {
       if (location.hash !== "#studio") location.hash = "studio";
       else render();
       return;
+    }
+    if (button.dataset.separateSong) {
+      await api("/jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          job_type: "separate",
+          source_id: button.dataset.separateSong,
+        }),
+      });
+      await refreshData();
+      return toast("已开始分离，完成后自动出现两条音轨");
+    }
+    if (button.hasAttribute("data-audition-close")) {
+      state.audition = null;
+      render();
+      return;
+    }
+    if (button.dataset.audition === "segment" || button.dataset.audition === "full") {
+      const preview = button.dataset.audition === "segment";
+      const params = buildCoverParams(preview);
+      await startAuditionJob(params);
+      toast(preview ? "已开始转换选中区间，完成后自动播放" : "整曲任务已开始，约 20 分钟");
+      return;
+    }
+    if (button.hasAttribute("data-audition-remix")) {
+      const job = auditionJob();
+      if (!job) return;
+      const params = {
+        job_type: "mix",
+        source_id: job.params.source_id,
+        instrumental_id: job.params.instrumental_id || null,
+        vocal_gain_db: state.audition.gains.vocal_gain_db,
+        instrumental_gain_db: state.audition.gains.instrumental_gain_db,
+        offset_ms: job.params.offset_ms,
+        formats: state.draft.formats.length ? state.draft.formats : ["mp3"],
+        name: `试听重混 · ${state.audition.iterations[0]?.summary || job.name}`,
+      };
+      await startAuditionJob(params);
+      return;
+    }
+    if (button.hasAttribute("data-audition-reconvert")) {
+      const job = auditionJob();
+      if (!job) return;
+      const params = {
+        ...job.params,
+        ...state.audition.convert,
+        name: `${job.params.name.replace(/ · v\d+$/, "")} · v${state.audition.iterations.length + 1}`,
+      };
+      await startAuditionJob(params);
+      toast("已按新参数重新转换选中区间");
+      return;
+    }
+    if (button.hasAttribute("data-audition-full")) {
+      const job = auditionJob();
+      const params = job
+        ? {
+            ...job.params,
+            ...state.audition.convert,
+            vocal_gain_db: state.audition.gains.vocal_gain_db,
+            instrumental_gain_db: state.audition.gains.instrumental_gain_db,
+            start_seconds: 0,
+            preview_seconds: 0,
+            name: job.params.name
+              .replace(/^试听 · /, "")
+              .replace(/ · v\d+$/, "")
+              .replace(/ · \d+秒起$/, " · 我的音色 · 完整版"),
+          }
+        : buildCoverParams(0);
+      await startAuditionJob(params);
+      return toast("整曲任务已开始，约 20 分钟，可在任务页查看进度");
     }
     if (button.dataset.log) {
       const result = await api(`/jobs/${button.dataset.log}/log`);
@@ -691,17 +1056,37 @@ document.addEventListener("click", async (event) => {
 
 document.addEventListener("input", (event) => {
   const field = event.target;
+  if (field.dataset.auditionGain && state.audition) {
+    state.audition.gains[field.dataset.auditionGain] = Number(field.value);
+    const output = field.parentElement.querySelector("output");
+    if (output) output.textContent = `${field.value} dB`;
+    return;
+  }
+  if (field.dataset.auditionConvert && state.audition) {
+    state.audition.convert[field.dataset.auditionConvert] = Number(field.value);
+    return;
+  }
   if (field.closest("#job-form") && field.name) {
-    if (field.name === "formats")
+    if (field.name === "formats") {
       state.draft.formats = [
         ...document.querySelectorAll('input[name="formats"]:checked'),
       ].map((f) => f.value);
+      // 记住用户的导出格式偏好，下次打开沿用。
+      try {
+        localStorage.setItem("cover.formats", JSON.stringify(state.draft.formats));
+      } catch {}
+    }
     else
-      state.draft[field.name] = ["range", "number"].includes(field.type)
-        ? Number(field.value)
-        : field.value;
+      state.draft[field.name] =
+        field.type === "checkbox"
+          ? field.checked
+          : ["range", "number"].includes(field.type)
+            ? Number(field.value)
+            : field.value;
     const output = document.querySelector(`[data-output="${field.name}"]`);
     if (output) output.textContent = `${field.value} dB`;
+    if (["vocal_gain_db", "instrumental_gain_db"].includes(field.name))
+      applyCombinedGainsLive();
   }
   if (field.id === "asset-search") {
     state.search = field.value;
@@ -718,7 +1103,14 @@ document.addEventListener("change", (event) => {
     state.draft.source_id = "";
     render();
   } else if (
-    ["source_id", "voice_id"].includes(event.target.name) &&
+    ["source_id", "voice_id", "instrumental_id"].includes(event.target.name) &&
+    event.target.closest("#job-form")
+  ) {
+    if (event.target.name === "instrumental_id")
+      state.draft.instrumental_id = event.target.value;
+    render();
+  } else if (
+    ["start_seconds", "preview_length"].includes(event.target.name) &&
     event.target.closest("#job-form")
   )
     render();
@@ -738,28 +1130,37 @@ document.addEventListener("submit", async (event) => {
   try {
     if (form.id === "job-form") {
       $("#job-error").textContent = "";
-      const params = { ...state.draft };
-      delete params.source_kind;
-      delete params.preview_length;
-      for (const key of ["voice_id", "instrumental_id", "lyric_id"])
-        params[key] ||= null;
-      if (!params.source_id) throw new Error("请先导入并选择演唱来源。");
-      if (params.job_type === "cover" && !params.voice_id)
-        throw new Error("请先导入并选择目标音色。");
-      if (!params.formats.length) throw new Error("请选择至少一种导出格式。");
-      const previewMode = event.submitter?.dataset.preview === "1";
-      if (previewMode) {
-        params.preview_seconds = Number(state.draft.preview_length) || 18;
-        params.start_seconds = Math.max(0, Number(state.draft.start_seconds) || 0);
-        if (!params.name)
-          params.name = `试听 · ${byId(params.source_id)?.name || "未命名"} · ${params.start_seconds}秒起`;
+      const d = state.draft;
+      if (!d.source_id) throw new Error("请先导入并选择演唱来源。");
+      if (d.job_type === "cover") {
+        await startAuditionJob(buildCoverParams(0));
+        toast("整曲任务已开始，约 20 分钟");
+      } else if (d.job_type === "mix") {
+        if (!d.instrumental_id) throw new Error("直接混音需要选择伴奏。");
+        await api("/jobs", {
+          method: "POST",
+          body: JSON.stringify({
+            job_type: "mix",
+            source_id: d.source_id,
+            instrumental_id: d.instrumental_id,
+            lyric_id: d.lyric_id || null,
+            vocal_gain_db: d.vocal_gain_db,
+            instrumental_gain_db: d.instrumental_gain_db,
+            offset_ms: d.offset_ms,
+            formats: d.formats,
+            name: d.name,
+          }),
+        });
+        await refreshData();
+        toast("混音任务已加入队列");
       } else {
-        params.start_seconds = 0;
-        params.preview_seconds = 0;
+        await api("/jobs", {
+          method: "POST",
+          body: JSON.stringify({ job_type: "separate", source_id: d.source_id }),
+        });
+        await refreshData();
+        toast("分离任务已加入队列");
       }
-      await api("/jobs", { method: "POST", body: JSON.stringify(params) });
-      await refreshData();
-      toast("任务已加入队列");
     } else if (form.id === "lyric-form") {
       const body = {
         name: form.elements.name.value,
@@ -798,23 +1199,198 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
-function playAsset(id) {
+// ---- 区间播放：单轨走底部播放器，人声+伴奏用 WebAudio 同步合播 ----
+
+function playAsset(id, region) {
   const asset = byId(id);
   if (!asset) return;
+  stopCombined();
   const audio = $("#audio");
-  if (audio.dataset.asset === id) {
+  if (!region && audio.dataset.asset === id && audio.src) {
     audio.paused ? audio.play().catch((e) => toast(e.message)) : audio.pause();
     return;
   }
   audio.dataset.asset = id;
   audio.src = `/api/assets/${id}/audio`;
+  if (region) {
+    audio.dataset.regionStart = String(region.start);
+    audio.dataset.regionEnd = String(region.start + region.length);
+  } else {
+    delete audio.dataset.regionStart;
+    delete audio.dataset.regionEnd;
+  }
   $("#player-title").textContent = asset.name;
-  $("#player-subtitle").textContent =
-    `${kindNames[asset.kind]} · ${ext(asset)}`;
+  $("#player-subtitle").textContent = `${kindNames[asset.kind]} · ${ext(asset)}${
+    region ? ` · ${Math.round(region.start)}–${Math.round(region.start + region.length)}秒区间` : ""
+  }`;
   $("#duration-time").textContent = time(asset.duration);
   $("#player").hidden = false;
   document.body.classList.add("has-player");
   audio.play().catch(() => toast("音频暂时无法播放，请尝试下载文件。"));
+}
+
+let audioContext = null;
+let combinedPlayback = null;
+const combinedCache = new Map();
+
+// ---- 播放指示：波形上的播放头 + 正在播放区间的进度填充 ----
+
+function paintTrackIndicators(trackIds, windowStart, position, duration) {
+  const active = new Set(trackIds);
+  for (const body of document.querySelectorAll("[data-play-track]")) {
+    const playhead = body.querySelector(".track-playhead");
+    const progress = body.querySelector(".track-window-progress");
+    if (!playhead || !progress) continue;
+    if (!active.has(body.dataset.playTrack) || !(duration > 0)) {
+      playhead.hidden = true;
+      progress.hidden = true;
+      continue;
+    }
+    const percent = Math.max(0, Math.min(100, (position / duration) * 100));
+    playhead.hidden = false;
+    playhead.style.left = `${percent}%`;
+    const from = Math.max(0, Math.min(windowStart, duration));
+    progress.hidden = false;
+    progress.style.left = `${(from / duration) * 100}%`;
+    progress.style.width = `${Math.max(0, percent - (from / duration) * 100)}%`;
+  }
+}
+
+function paintElementTrackIndicators() {
+  const audio = $("#audio");
+  if (!audio.dataset.asset || !audio.src) {
+    paintTrackIndicators([], 0, 0, 0);
+    return;
+  }
+  paintTrackIndicators(
+    [audio.dataset.asset],
+    Number(audio.dataset.regionStart || 0),
+    audio.currentTime,
+    audio.duration || byId(audio.dataset.asset)?.duration || 0,
+  );
+}
+
+// 播放中拖动音量滑杆，立即作用到对应音轨（不重新播放）。
+function applyCombinedGainsLive() {
+  if (!combinedPlayback || !audioContext) return;
+  const dbs = [state.draft.vocal_gain_db, state.draft.instrumental_gain_db];
+  combinedPlayback.channels.forEach((channel, index) => {
+    const value = 10 ** ((dbs[index] ?? 0) / 20);
+    channel.gain.setTargetAtTime(value, audioContext.currentTime, 0.03);
+  });
+}
+
+function tickCombinedIndicators() {
+  if (!combinedPlayback) return;
+  const elapsed = audioContext.currentTime - combinedPlayback.startedAt;
+  const position = combinedPlayback.start + Math.max(0, elapsed);
+  paintTrackIndicators(
+    combinedPlayback.trackIds,
+    combinedPlayback.start,
+    Math.min(position, combinedPlayback.start + combinedPlayback.length),
+    combinedPlayback.duration,
+  );
+  combinedPlayback.frame = requestAnimationFrame(tickCombinedIndicators);
+}
+
+function stopCombined() {
+  if (combinedPlayback) {
+    cancelAnimationFrame(combinedPlayback.frame);
+    for (const source of combinedPlayback.sources) {
+      try {
+        source.stop();
+      } catch {}
+      source.disconnect();
+    }
+    combinedPlayback.gain.disconnect();
+    combinedPlayback = null;
+  }
+  const button = document.querySelector("[data-play-combined]");
+  if (button && button.dataset.playing) {
+    delete button.dataset.playing;
+    button.innerHTML = `${icon("layers")}人声+伴奏`;
+    if (window.lucide) lucide.createIcons();
+  }
+  if ($("#audio").dataset.asset && $("#audio").src) paintElementTrackIndicators();
+  else paintTrackIndicators([], 0, 0, 0);
+}
+
+async function playCombinedRegion() {
+  const stems = coverStems();
+  if (!stems.vocal) return toast("请先选择音源。");
+  if (!stems.instrumental)
+    return playAsset(stems.vocal.id, regionOf(stems.vocal.duration));
+  if (combinedPlayback) return stopCombined();
+  const button = document.querySelector("[data-play-combined]");
+  if (button) {
+    button.dataset.playing = "1";
+    button.innerHTML = `${icon("square")}停止合播`;
+    if (window.lucide) lucide.createIcons();
+  }
+  try {
+    $("#audio").pause();
+    audioContext = audioContext || new AudioContext();
+    await audioContext.resume();
+    const context = audioContext;
+    const decode = async (asset) => {
+      if (combinedCache.has(asset.id)) return combinedCache.get(asset.id);
+      const response = await fetch(`/api/assets/${asset.id}/audio`);
+      const buffer = await context.decodeAudioData(await response.arrayBuffer());
+      if (combinedCache.size >= 4)
+        combinedCache.delete(combinedCache.keys().next().value);
+      combinedCache.set(asset.id, buffer);
+      return buffer;
+    };
+    const [vocalBuffer, instrumentalBuffer] = await Promise.all([
+      decode(stems.vocal),
+      decode(stems.instrumental),
+    ]);
+    const region = regionOf(stems.vocal.duration);
+    const start = Math.max(
+      0,
+      Math.min(region.start, vocalBuffer.duration - 1, instrumentalBuffer.duration - 1),
+    );
+    const end = Math.min(
+      region.start + region.length,
+      vocalBuffer.duration,
+      instrumentalBuffer.duration,
+    );
+    if (end - start < 0.5) {
+      stopCombined();
+      return toast("选中区间超出音频范围，请重新框选。");
+    }
+    const gain = context.createGain();
+    gain.connect(context.destination);
+    const channels = [state.draft.vocal_gain_db, state.draft.instrumental_gain_db].map((db) => {
+      const channel = context.createGain();
+      channel.gain.value = 10 ** (db / 20);
+      channel.connect(gain);
+      return channel;
+    });
+    const sources = [vocalBuffer, instrumentalBuffer].map((buffer, index) => {
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(channels[index]);
+      source.start(0, start, end - start);
+      return source;
+    });
+    combinedPlayback = {
+      sources,
+      gain,
+      channels,
+      trackIds: [stems.vocal.id, stems.instrumental.id],
+      start,
+      length: end - start,
+      duration: vocalBuffer.duration,
+      startedAt: context.currentTime,
+      frame: 0,
+    };
+    sources[0].onended = () => stopCombined();
+    tickCombinedIndicators();
+  } catch (error) {
+    stopCombined();
+    toast(`合播失败：${error.message}`);
+  }
 }
 
 function closePlayer() {
@@ -823,6 +1399,7 @@ function closePlayer() {
   $("#audio").dataset.asset = "";
   $("#player").hidden = true;
   document.body.classList.remove("has-player");
+  paintTrackIndicators([], 0, 0, 0);
 }
 $("#close-player").onclick = closePlayer;
 $("#play-toggle").onclick = () => {
@@ -844,9 +1421,18 @@ $("#audio").ontimeupdate = () => {
   $("#seek").value = audio.duration
     ? (audio.currentTime / audio.duration) * 100
     : 0;
+  // 到区间末尾后自动继续播放整轨；播放头滑出高亮带即可看出已超区间。
+  if (audio.dataset.regionEnd && audio.currentTime >= Number(audio.dataset.regionEnd))
+    delete audio.dataset.regionEnd;
+  paintElementTrackIndicators();
 };
-$("#audio").onloadedmetadata = () =>
-  ($("#duration-time").textContent = time($("#audio").duration));
+$("#audio").onloadedmetadata = () => {
+  const audio = $("#audio");
+  $("#duration-time").textContent = time(audio.duration);
+  const regionStart = Number(audio.dataset.regionStart || 0);
+  if (regionStart && Math.abs(audio.currentTime - regionStart) > 0.5)
+    audio.currentTime = regionStart;
+};
 for (const event of ["play", "pause", "ended"])
   $("#audio").addEventListener(event, () => {
     $("#play-toggle").innerHTML = icon($("#audio").paused ? "play" : "pause");
@@ -896,10 +1482,68 @@ async function poll() {
       state.jobs = jobs;
       state.assets = await api("/assets");
       updateChrome();
+      const audition = state.audition;
+      let auditionFinished = false;
+      if (audition) {
+        const job = jobs.find((j) => j.id === audition.jobId);
+        if (job && !activeStates.includes(job.state) && !audition.shown) {
+          audition.shown = true;
+          auditionFinished = true;
+          if (job.state === "completed") {
+            const output = job.outputs.map(byId).filter(Boolean);
+            const mp3 = (output.find((x) => x.path.endsWith(".mp3")) || output[0])?.id;
+            if (mp3)
+              audition.iterations.unshift({
+                mp3,
+                summary: summarizeAudition(job),
+              });
+            render();
+            if (mp3) playAsset(mp3);
+          }
+        }
+      }
       if (state.page === "studio") {
-        $("#studio-jobs").innerHTML = renderRecentJobs();
-        $("#studio-outputs").innerHTML = renderRecentOutputs();
-        finishRender();
+        if (auditionFinished && state.audition) {
+          // render() already ran above; refresh canvases and icons once more.
+          finishRender();
+        } else {
+          // Region section follows separation progress without touching form inputs.
+          const source = byId(state.draft.source_id);
+          const separation =
+            source?.kind === "song"
+              ? (pendingSeparation(source.id) || separationFor(source.id)?.job)
+              : null;
+          const regionKey = [
+            state.draft.job_type,
+            state.draft.source_id,
+            separation?.id || "",
+            separation?.state || "",
+            separation?.progress || 0,
+          ].join("|");
+          const regionPanel = $("#region-panel");
+          if (regionPanel && regionPanel.dataset.key !== regionKey) {
+            regionPanel.dataset.key = regionKey;
+            regionPanel.innerHTML = renderRegionSection();
+          }
+          const panel = $("#audition-panel");
+          const running = state.audition
+            ? jobs.find((j) => j.id === state.audition.jobId)
+            : null;
+          const key = [
+            state.audition?.jobId || "",
+            running?.state || "",
+            running?.progress || 0,
+            state.audition?.iterations.length || 0,
+          ].join("|");
+          if (panel && panel.dataset.key !== key) {
+            panel.dataset.key = key;
+            panel.innerHTML = renderAuditionInner();
+            finishRender();
+          }
+          $("#studio-jobs").innerHTML = renderRecentJobs();
+          $("#studio-outputs").innerHTML = renderRecentOutputs();
+          finishRender();
+        }
       } else if (["jobs", "outputs"].includes(state.page)) render();
     }
   } catch {}
@@ -911,6 +1555,11 @@ async function poll() {
     state.page = pageNames[location.hash.slice(1)]
       ? location.hash.slice(1)
       : "studio";
+    try {
+      const saved = JSON.parse(localStorage.getItem("cover.formats") || "null");
+      if (Array.isArray(saved) && saved.length && saved.every((f) => ["wav", "mp3"].includes(f)))
+        state.draft.formats = saved;
+    } catch {}
     await refreshData(true);
     if (state.page === "lyrics" && state.lyrics.length) {
       state.selectedLyric = state.lyrics[0].id;
