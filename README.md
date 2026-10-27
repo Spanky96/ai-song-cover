@@ -18,6 +18,12 @@
 - **MCP 工具服务**：内置 13 个 MCP 工具，可让 Claude Code 等 AI 客户端直接调用整个工作流。
 - **本地与安全**：SQLite 本地持久化、仅本机访问、上传大小和磁盘余量检查。
 
+## 界面预览
+
+![创作工作台](docs/images/ui-studio.png)
+
+创作工作台：选择音色、上传原唱歌曲或干声、调节转换参数并试听片段，满意后再生成整曲；音色库、素材库、歌词库、作品和任务都在左侧导航中切换。
+
 ## 快速开始
 
 ### 环境要求
@@ -89,3 +95,11 @@ uv run ruff check app scripts tests
 ## 许可证
 
 本项目以 [MIT License](LICENSE) 开源。推理所用的上游组件保留各自许可：[Seed-VC](https://github.com/Plachtaa/seed-vc)（GPL-3.0）、[Demucs](https://github.com/facebookresearch/demucs)（MIT）、[Lucide](https://lucide.dev)（ISC）。
+
+## 捐赠
+
+如果这个项目对你有帮助，欢迎扫描下方二维码请作者喝杯咖啡 ☕
+
+<p>
+  <img src="docs/images/donate.jpg" width="240" alt="捐赠二维码" />
+</p>
