@@ -117,6 +117,17 @@ uv run python scripts/smoke_ai.py
 
 默认取得校验过的上游音频，截取 6 秒并以 10 步运行完整流程；通过 `--source '/实际歌曲路径' --reference '/实际参考人声路径'` 使用自己的素材。结果写入 `artifacts/ai-validation/result.json`，检查真实模型执行、分离与导出时长、非空波形及下载。当前样例的分离人声能量较低，主要用于验证流程联通，不评价音色相似度或完整歌曲听感；短片段耗时也不能直接推算整首歌或默认 30 步的耗时。
 
+## MCP 工具服务
+
+项目自带 MCP 服务器（`mcp_server/`），把主要流程编排为 13 个工具，供 Claude Code 等客户端直接调用，无需打开网页：
+
+- `voice_swap`：一键换声——上传本地音频、解析音色（默认匹配「我的声音」）、提交转换、等待完成并把成品下载到 `~/Downloads`（默认 MP3，长歌建议先 `preview_seconds=15` 试听调参）。
+- 素材与任务：`list_assets`、`upload_audio`、`delete_asset`、`download_asset`。
+- 任务编排：`create_job`（cover/mix/separate 细粒度参数）、`get_job`、`list_jobs`、`wait_job`、`get_job_log`、`cancel_job`、`retry_job`。
+- `studio_status`：查看引擎与存储状态；服务未启动时会自动后台拉起（与 `scripts/start_background.py` 相同方式，日志写入 `artifacts/server.log`）。
+
+MCP 运行环境通过依赖分组 `mcp` 提供（`uv run --group mcp`）。项目根目录的 `.mcp.json` 已注册 `cover-studio`，在 Claude Code 中打开本仓库即可使用。服务地址默认 `http://127.0.0.1:8765`，可用环境变量 `COVER_URL` 覆盖；成品下载目录可用 `COVER_MCP_OUTPUT_DIR` 覆盖。相关测试在 `tests/test_mcp_server.py`。
+
 ## 当前限制
 
 - 已导入用户的录音、三份音色成品和目标歌曲，完成四组短片段对照及《我和我的祖国》整首转换，详见 [个人翻唱结果](docs/PERSONAL_COVER_RESULTS.md)。用户主观音色相似度、高音、气声及咬字听感仍需试听验收。

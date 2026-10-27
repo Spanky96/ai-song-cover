@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "cover-studio": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--group",
+        "mcp",
+        "--directory",
+        "/Users/yangyiming/Documents/mynew/全民K歌",
+        "python",
+        "-m",
+        "mcp_server.server"
+      ],
+      "env": {}
+    }
+  }
+}

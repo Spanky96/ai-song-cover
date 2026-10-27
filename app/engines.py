@@ -142,7 +142,7 @@ print(json.dumps(result))
             "--f0-condition",
             "True",
             "--auto-f0-adjust",
-            "False",
+            str(params.get("auto_f0_adjust", False)),
             "--semi-tone-shift",
             str(params["pitch_shift"]),
             "--fp16",

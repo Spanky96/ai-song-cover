@@ -46,6 +46,7 @@ class JobRequest(BaseModel):
     diffusion_steps: int = Field(default=30, ge=10, le=100)
     cfg_rate: float = Field(default=0.7, ge=0, le=1)
     pitch_shift: int = Field(default=0, ge=-12, le=12)
+    auto_f0_adjust: bool = False
     vocal_gain_db: float = Field(default=0, ge=-24, le=12)
     instrumental_gain_db: float = Field(default=-3, ge=-24, le=12)
     offset_ms: int = Field(default=0, ge=-10000, le=10000)

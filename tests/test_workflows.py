@@ -257,6 +257,16 @@ def test_seed_singing_command_retains_pitch_and_duration(application):
         assert command[command.index(key) + 1] == expected
 
 
+def test_seed_command_maps_auto_f0_adjust(application):
+    command = application.state.engines.seed_command(
+        Path("source.wav"),
+        Path("voice.wav"),
+        Path("result"),
+        {"diffusion_steps": 30, "cfg_rate": 0.7, "pitch_shift": 0, "auto_f0_adjust": True},
+    )
+    assert command[command.index("--auto-f0-adjust") + 1] == "True"
+
+
 def test_retry_preserves_original_lyric_after_edit_or_delete(client, wav):
     vocal = upload(client, wav)
     lyric = client.post("/api/lyrics", json={"name": "原稿", "content": "第一版歌词"}).json()
