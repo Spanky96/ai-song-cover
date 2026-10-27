@@ -47,7 +47,7 @@ def main():
     root = args.models_dir.expanduser().resolve()
     if not (root / "seed-vc/inference.py").is_file():
         raise SystemExit("请先完成推理环境安装。")
-    audit = json.loads((PROJECT / "docs/storage-audit.json").read_text())
+    audit = json.loads((PROJECT / "scripts/storage-audit.json").read_text())
     if not audit["completeness"]["model_inventory_complete"]:
         raise SystemExit("模型文件清单不完整，未开始下载。")
 

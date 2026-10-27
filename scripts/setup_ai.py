@@ -17,7 +17,7 @@ from urllib.request import urlopen
 PROJECT = Path(__file__).resolve().parent.parent
 SEED_REVISION = "51383efd921027683c89e5348211d93ff12ac2a8"
 GIB = 1024**3
-AUDIT = PROJECT / "docs/storage-audit.json"
+AUDIT = PROJECT / "scripts/storage-audit.json"
 
 
 def run(command, environment):

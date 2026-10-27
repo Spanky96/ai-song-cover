@@ -7,7 +7,7 @@
         "--group",
         "mcp",
         "--directory",
-        "/Users/yangyiming/Documents/mynew/全民K歌",
+        ".",
         "python",
         "-m",
         "mcp_server.server"
